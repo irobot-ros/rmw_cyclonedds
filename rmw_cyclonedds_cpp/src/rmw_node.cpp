@@ -449,6 +449,82 @@ extern "C" rmw_ret_t rmw_set_log_severity(rmw_log_severity_t severity)
   return RMW_RET_OK;
 }
 
+extern "C" rmw_ret_t rmw_set_subscription_callback(
+  const void * executor_context,
+  Event_callback executor_callback,
+  const void * subscription_handle,
+  void * rmw_subscription)
+{
+  (void)executor_context;
+  (void)executor_callback;
+  (void)subscription_handle;
+  (void)rmw_subscription;
+  // auto subscription = static_cast<CddsSubscription *>(rmw_subscription);
+  // subscription->setCallback(executor_context, callback, subscription_handle);
+  RCUTILS_LOG_ERROR_NAMED(
+    "rmw_node.cpp",
+    "rmw_set_subscription_callback: not supported (yet)");
+  return RMW_RET_UNSUPPORTED;
+}
+
+extern "C" rmw_ret_t rmw_set_service_callback(
+  const void * executor_context,
+  Event_callback executor_callback,
+  const void * service_handle,
+  void * rmw_service)
+{
+  (void)executor_context;
+  (void)executor_callback;
+  (void)service_handle;
+  (void)rmw_service;
+  // auto service = static_cast<CddsService *>(rmw_service);
+  // service->setCallback(executor_context, callback, service_handle);
+  RCUTILS_LOG_ERROR_NAMED(
+    "rmw_node.cpp",
+    "rmw_set_service_callback: not supported (yet)");
+  return RMW_RET_UNSUPPORTED;
+}
+
+extern "C" rmw_ret_t rmw_set_client_callback(
+  const void * executor_context,
+  Event_callback executor_callback,
+  const void * client_handle,
+  void * rmw_client)
+{
+  (void)executor_context;
+  (void)executor_callback;
+  (void)client_handle;
+  (void)rmw_client;
+  // auto client = static_cast<CddsClient *>(rmw_client);
+  // client->setCallback(executor_context, callback, client_handle);
+  RCUTILS_LOG_ERROR_NAMED(
+    "rmw_node.cpp",
+    "rmw_set_client_callback: not supported (yet)");
+  return RMW_RET_UNSUPPORTED;
+}
+
+extern "C" rmw_ret_t rmw_set_guard_condition_callback(
+  const void * executor_context,
+  Event_callback executor_callback,
+  const void * guard_condition_handle,
+  void * rmw_guard_condition,
+  bool use_previous_events)
+{
+  (void)executor_context;
+  (void)executor_callback;
+  (void)guard_condition_handle;
+  (void)rmw_guard_condition;
+  (void)use_previous_events;
+  // auto guard_condition = static_cast<CddsGuardCondition *>(rmw_guard_condition);
+  // guard_condition->setCallback(executor_context, callback,
+  //                              guard_condition_handle, use_previous_events);
+  RCUTILS_LOG_ERROR_NAMED(
+    "rmw_node.cpp",
+    "rmw_set_guard_condition_callback: not supported (yet)");
+  return RMW_RET_UNSUPPORTED;
+}
+
+
 extern "C" rmw_ret_t rmw_init_options_init(
   rmw_init_options_t * init_options,
   rcutils_allocator_t allocator)
