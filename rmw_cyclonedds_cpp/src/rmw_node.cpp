@@ -503,7 +503,7 @@ extern "C" rmw_ret_t rmw_client_set_events_executor_callback(
   return RMW_RET_UNSUPPORTED;
 }
 
-extern "C" rmw_ret_t rmw_set_guard_condition_callback(
+extern "C" rmw_ret_t rmw_guard_condition_set_events_executor_callback(
   const void * executor_context,
   ExecutorEventCallback executor_callback,
   const void * guard_condition_handle,
@@ -520,7 +520,7 @@ extern "C" rmw_ret_t rmw_set_guard_condition_callback(
   //                              guard_condition_handle, use_previous_events);
   RCUTILS_LOG_ERROR_NAMED(
     "rmw_node.cpp",
-    "rmw_set_guard_condition_callback: not supported (yet)");
+    "rmw_guard_condition_set_events_executor_callback: not supported (yet)");
   return RMW_RET_UNSUPPORTED;
 }
 
