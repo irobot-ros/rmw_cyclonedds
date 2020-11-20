@@ -451,17 +451,17 @@ extern "C" rmw_ret_t rmw_set_log_severity(rmw_log_severity_t severity)
 }
 
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
-  const void * executor_context,
+  const void * callback_context,
   rmw_listener_cb_t callback,
   const void * subscription_handle,
   rmw_subscription_t * rmw_subscription)
 {
-  (void)executor_context;
+  (void)callback_context;
   (void)callback;
   (void)subscription_handle;
   (void)rmw_subscription;
   // auto subscription = static_cast<CddsSubscription *>(rmw_subscription->data);
-  // subscription->setCallback(executor_context, callback, subscription_handle);
+  // subscription->setCallback(callback_context, callback, subscription_handle);
   RCUTILS_LOG_ERROR_NAMED(
     "rmw_node.cpp",
     "rmw_subscription_set_listener_callback: not supported (yet)");
@@ -469,17 +469,17 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
-  const void * executor_context,
+  const void * callback_context,
   rmw_listener_cb_t callback,
   const void * service_handle,
   rmw_service_t * rmw_service)
 {
-  (void)executor_context;
+  (void)callback_context;
   (void)callback;
   (void)service_handle;
   (void)rmw_service;
   // auto service = static_cast<CddsService *>(rmw_service->data);
-  // service->setCallback(executor_context, callback, service_handle);
+  // service->setCallback(callback_context, callback, service_handle);
   RCUTILS_LOG_ERROR_NAMED(
     "rmw_node.cpp",
     "rmw_service_set_listener_callback: not supported (yet)");
@@ -487,17 +487,17 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
-  const void * executor_context,
+  const void * callback_context,
   rmw_listener_cb_t callback,
   const void * client_handle,
   rmw_client_t * rmw_client)
 {
-  (void)executor_context;
+  (void)callback_context;
   (void)callback;
   (void)client_handle;
   (void)rmw_client;
   // auto client = static_cast<CddsClient *>(rmw_client->data);
-  // client->setCallback(executor_context, callback, client_handle);
+  // client->setCallback(callback_context, callback, client_handle);
   RCUTILS_LOG_ERROR_NAMED(
     "rmw_node.cpp",
     "rmw_client_set_listener_callback: not supported (yet)");
@@ -505,19 +505,19 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
-  const void * executor_context,
+  const void * callback_context,
   rmw_listener_cb_t callback,
   const void * guard_condition_handle,
   rmw_guard_condition_t * rmw_guard_condition,
   bool use_previous_events)
 {
-  (void)executor_context;
+  (void)callback_context;
   (void)callback;
   (void)guard_condition_handle;
   (void)rmw_guard_condition;
   (void)use_previous_events;
   // auto guard_condition = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
-  // guard_condition->setCallback(executor_context, callback,
+  // guard_condition->setCallback(callback_context, callback,
   //                              guard_condition_handle, use_previous_events);
   RCUTILS_LOG_ERROR_NAMED(
     "rmw_node.cpp",
@@ -526,19 +526,19 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_event_set_events_listener_callback(
-  const void * executor_context,
+  const void * callback_context,
   rmw_listener_cb_t callback,
   const void * waitable_handle,
   rmw_event_t * rmw_event,
   bool use_previous_events)
 {
-  (void)executor_context;
+  (void)callback_context;
   (void)callback;
   (void)waitable_handle;
   (void)rmw_event;
   (void)use_previous_events;
   // auto event = static_cast<CddsEvent *>(rmw_event->data);
-  // event->setCallback(executor_context, callback,
+  // event->setCallback(callback_context, callback,
   //                              waitable_handle, use_previous_events);
   RCUTILS_LOG_ERROR_NAMED(
     "rmw_node.cpp",
