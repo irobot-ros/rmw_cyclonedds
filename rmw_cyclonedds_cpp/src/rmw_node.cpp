@@ -77,7 +77,6 @@
 #include "namespace_prefix.hpp"
 
 #include "dds/dds.h"
-#include "dds/ddsi/ddsi_sertopic.h"
 #include "serdes.hpp"
 #include "serdata.hpp"
 #include "demangle.hpp"
@@ -89,6 +88,10 @@ using namespace std::literals::chrono_literals;
 #define RMW_SUPPORT_SECURITY 1
 #else
 #define RMW_SUPPORT_SECURITY 0
+#endif
+
+#if !DDS_HAS_DDSI_SERTYPE
+#define ddsi_sertype_unref(x) ddsi_sertopic_unref(x)
 #endif
 
 /* Set to > 0 for printing warnings to stderr for each messages that was taken more than this many
@@ -187,7 +190,26 @@ struct Cdds
   {}
 };
 
-static Cdds gcdds;
+/* Use construct-on-first-use for the global state rather than a plain global variable to
+   prevent its destructor from running prior to last use by some other component in the
+   system.  E.g., some rclcpp tests (at the time of this commit) drop a guard condition in
+   a global destructor, but (at least) on Windows the Cyclone RMW global dtors run before
+   the global dtors of that test, resulting in rmw_destroy_guard_condition() attempting to
+   use the already destroyed "Cdds::waitsets".
+
+   The memory leak this causes is minor (an empty map of domains and an empty set of
+   waitsets) and by definition only once.  The alternative of elimating it altogether or
+   tying its existence to init/shutdown is problematic because this state is used across
+   domains and contexts.
+
+   The only practical alternative I see is to extend Cyclone's run-time state (which is
+   managed correctly for these situations), but it is not Cyclone's responsibility to work
+   around C++ global destructor limitations. */
+static Cdds & gcdds()
+{
+  static Cdds * x = new Cdds();
+  return *x;
+}
 
 struct CddsEntity
 {
@@ -316,7 +338,7 @@ struct CddsPublisher : CddsEntity
 {
   dds_instance_handle_t pubiid;
   rmw_gid_t gid;
-  struct ddsi_sertopic * sertopic;
+  struct ddsi_sertype * sertype;
 };
 
 struct CddsSubscription : CddsEntity
@@ -832,10 +854,10 @@ static rmw_ret_t discovery_thread_stop(rmw_dds_common::Context & common_context)
 static bool check_create_domain(dds_domainid_t did, rmw_localhost_only_t localhost_only_option)
 {
   const bool localhost_only = (localhost_only_option == RMW_LOCALHOST_ONLY_ENABLED);
-  std::lock_guard<std::mutex> lock(gcdds.domains_lock);
+  std::lock_guard<std::mutex> lock(gcdds().domains_lock);
   /* return true: n_nodes incremented, localhost_only set correctly, domain exists
      "      false: n_nodes unchanged, domain left intact if it already existed */
-  CddsDomain & dom = gcdds.domains[did];
+  CddsDomain & dom = gcdds().domains[did];
   if (dom.refcount != 0) {
     /* Localhost setting must match */
     if (localhost_only == dom.localhost_only) {
@@ -873,7 +895,7 @@ static bool check_create_domain(dds_domainid_t did, rmw_localhost_only_t localho
         "rmw_cyclonedds_cpp",
         "rmw_create_node: failed to retrieve CYCLONEDDS_URI environment variable, error %s",
         get_env_error);
-      gcdds.domains.erase(did);
+      gcdds().domains.erase(did);
       return false;
     }
 
@@ -881,7 +903,7 @@ static bool check_create_domain(dds_domainid_t did, rmw_localhost_only_t localho
       RCUTILS_LOG_ERROR_NAMED(
         "rmw_cyclonedds_cpp",
         "rmw_create_node: failed to create domain, error %s", dds_strretcode(dom.domain_handle));
-      gcdds.domains.erase(did);
+      gcdds().domains.erase(did);
       return false;
     } else {
       return true;
@@ -894,12 +916,12 @@ void
 check_destroy_domain(dds_domainid_t domain_id)
 {
   if (domain_id != UINT32_MAX) {
-    std::lock_guard<std::mutex> lock(gcdds.domains_lock);
-    CddsDomain & dom = gcdds.domains[domain_id];
+    std::lock_guard<std::mutex> lock(gcdds().domains_lock);
+    CddsDomain & dom = gcdds().domains[domain_id];
     assert(dom.refcount > 0);
     if (--dom.refcount == 0) {
       static_cast<void>(dds_delete(dom.domain_handle));
-      gcdds.domains.erase(domain_id);
+      gcdds().domains.erase(domain_id);
     }
   }
 }
@@ -1549,45 +1571,50 @@ extern "C" rmw_ret_t rmw_deserialize(
 ///////////                                                                   ///////////
 /////////////////////////////////////////////////////////////////////////////////////////
 
-/* Publications need the sertopic that DDSI uses for the topic when publishing a
+/* Publications need the sertype that DDSI uses for the topic when publishing a
    serialized message.  With the old ("arbitrary") interface of Cyclone, one doesn't know
-   the sertopic that is actually used because that may be the one that was provided in the
+   the sertype that is actually used because that may be the one that was provided in the
    call to dds_create_topic_arbitrary(), but it may also be one that was introduced by a
    preceding call to create the same topic.
 
    There is no way of discovering which case it is, and there is no way of getting access
-   to the correct sertopic.  The best one can do is to keep using one provided when
-   creating the topic -- and fortunately using the wrong sertopic has surprisingly few
+   to the correct sertype.  The best one can do is to keep using one provided when
+   creating the topic -- and fortunately using the wrong sertype has surprisingly few
    nasty side-effects, but it still wrong.
 
    Because the caller retains ownership, so this is easy, but it does require dropping the
    reference when cleaning up.
 
    The new ("generic") interface instead takes over the ownership of the reference iff it
-   succeeds and it returns a non-counted reference to the sertopic actually used.  The
+   succeeds and it returns a non-counted reference to the sertype actually used.  The
    lifetime of the reference is at least as long as the lifetime of the DDS topic exists;
    and the topic's lifetime is at least that of the readers/writers using it.  This
    reference can therefore safely be used. */
 
 static dds_entity_t create_topic(
-  dds_entity_t pp, struct ddsi_sertopic * sertopic,
-  struct ddsi_sertopic ** stact)
+  dds_entity_t pp, const char * name, struct ddsi_sertype * sertype,
+  struct ddsi_sertype ** stact)
 {
   dds_entity_t tp;
-  tp = dds_create_topic_generic(pp, &sertopic, nullptr, nullptr, nullptr);
+#if DDS_HAS_DDSI_SERTYPE
+  tp = dds_create_topic_sertype(pp, name, &sertype, nullptr, nullptr, nullptr);
+#else
+  static_cast<void>(name);
+  tp = dds_create_topic_generic(pp, &sertype, nullptr, nullptr, nullptr);
+#endif
   if (tp < 0) {
-    ddsi_sertopic_unref(sertopic);
+    ddsi_sertype_unref(sertype);
   } else {
     if (stact) {
-      *stact = sertopic;
+      *stact = sertype;
     }
   }
   return tp;
 }
 
-static dds_entity_t create_topic(dds_entity_t pp, struct ddsi_sertopic * sertopic)
+static dds_entity_t create_topic(dds_entity_t pp, const char * name, struct ddsi_sertype * sertype)
 {
-  dds_entity_t tp = create_topic(pp, sertopic, nullptr);
+  dds_entity_t tp = create_topic(pp, name, sertype, nullptr);
   return tp;
 }
 
@@ -1637,7 +1664,7 @@ extern "C" rmw_ret_t rmw_publish_serialized_message(
     return RMW_RET_INVALID_ARGUMENT);
   auto pub = static_cast<CddsPublisher *>(publisher->data);
   struct ddsi_serdata * d = serdata_rmw_from_serialized_message(
-    pub->sertopic, serialized_message->buffer, serialized_message->buffer_length);
+    pub->sertype, serialized_message->buffer, serialized_message->buffer_length);
   const bool ok = (dds_writecdr(pub->enth, d) >= 0);
   return ok ? RMW_RET_OK : RMW_RET_ERROR;
 }
@@ -1665,13 +1692,22 @@ static const rosidl_message_type_support_t * get_typesupport(
   {
     return ts;
   } else {
+    rcutils_error_string_t prev_error_string = rcutils_get_error_string();
+    rcutils_reset_error();
     if ((ts =
       get_message_typesupport_handle(
         type_supports, rosidl_typesupport_introspection_cpp::typesupport_identifier)) != nullptr)
     {
       return ts;
     } else {
-      RMW_SET_ERROR_MSG("type support not from this implementation");
+      rcutils_error_string_t error_string = rcutils_get_error_string();
+      rcutils_reset_error();
+      RMW_SET_ERROR_MSG_WITH_FORMAT_STRING(
+        "Type support not from this implementation. Got:\n"
+        "    %s\n"
+        "    %s\n"
+        "while fetching it",
+        prev_error_string.str, error_string.str);
       return nullptr;
     }
   }
@@ -1955,12 +1991,12 @@ static CddsPublisher * create_cdds_publisher(
 
   std::string fqtopic_name = make_fqtopic(ROS_TOPIC_PREFIX, topic_name, "", qos_policies);
 
-  auto sertopic = create_sertopic(
+  auto sertype = create_sertype(
     fqtopic_name.c_str(), type_support->typesupport_identifier,
     create_message_type_support(type_support->data, type_support->typesupport_identifier), false,
     rmw_cyclonedds_cpp::make_message_value_type(type_supports));
-  struct ddsi_sertopic * stact;
-  topic = create_topic(dds_ppant, sertopic, &stact);
+  struct ddsi_sertype * stact;
+  topic = create_topic(dds_ppant, fqtopic_name.c_str(), sertype, &stact);
   if (topic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
     goto fail_topic;
@@ -1977,7 +2013,7 @@ static CddsPublisher * create_cdds_publisher(
     goto fail_instance_handle;
   }
   get_entity_gid(pub->enth, pub->gid);
-  pub->sertopic = stact;
+  pub->sertype = stact;
   dds_delete_qos(qos);
   dds_delete(topic);
   return pub;
@@ -1990,7 +2026,7 @@ fail_writer:
   dds_delete_qos(qos);
 fail_qos:
   dds_delete(topic);
-  ddsi_sertopic_unref(stact);
+  ddsi_sertype_unref(stact);
 fail_topic:
   delete pub;
   return nullptr;
@@ -2331,11 +2367,11 @@ static CddsSubscription * create_cdds_subscription(
 
   std::string fqtopic_name = make_fqtopic(ROS_TOPIC_PREFIX, topic_name, "", qos_policies);
 
-  auto sertopic = create_sertopic(
+  auto sertype = create_sertype(
     fqtopic_name.c_str(), type_support->typesupport_identifier,
     create_message_type_support(type_support->data, type_support->typesupport_identifier), false,
     rmw_cyclonedds_cpp::make_message_value_type(type_supports));
-  topic = create_topic(dds_ppant, sertopic);
+  topic = create_topic(dds_ppant, fqtopic_name.c_str(), sertype);
   if (topic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
     goto fail_topic;
@@ -2785,8 +2821,8 @@ static rmw_ret_t rmw_take_ser_int(
   CddsSubscription * sub = static_cast<CddsSubscription *>(subscription->data);
   RET_NULL(sub);
   dds_sample_info_t info;
-  struct ddsi_serdata * dcmn;
-  while (dds_takecdr(sub->enth, &dcmn, 1, &info, DDS_ANY_STATE) == 1) {
+  struct ddsi_serdata * d;
+  while (dds_takecdr(sub->enth, &d, 1, &info, DDS_ANY_STATE) == 1) {
     if (info.valid_data) {
       if (message_info) {
         message_info->publisher_gid.implementation_identifier = eclipse_cyclonedds_identifier;
@@ -2796,20 +2832,19 @@ static rmw_ret_t rmw_take_ser_int(
           message_info->publisher_gid.data, &info.publication_handle,
           sizeof(info.publication_handle));
       }
-      auto d = static_cast<serdata_rmw *>(dcmn);
-      /* FIXME: what about the header - should be included or not? */
-      if (rmw_serialized_message_resize(serialized_message, d->size()) != RMW_RET_OK) {
-        ddsi_serdata_unref(dcmn);
+      size_t size = ddsi_serdata_size(d);
+      if (rmw_serialized_message_resize(serialized_message, size) != RMW_RET_OK) {
+        ddsi_serdata_unref(d);
         *taken = false;
         return RMW_RET_ERROR;
       }
-      memcpy(serialized_message->buffer, d->data(), d->size());
-      serialized_message->buffer_length = d->size();
-      ddsi_serdata_unref(dcmn);
+      ddsi_serdata_to_ser(d, 0, size, serialized_message->buffer);
+      serialized_message->buffer_length = size;
+      ddsi_serdata_unref(d);
       *taken = true;
       return RMW_RET_OK;
     }
-    ddsi_serdata_unref(dcmn);
+    ddsi_serdata_unref(d);
   }
   *taken = false;
   return RMW_RET_OK;
@@ -3188,21 +3223,21 @@ extern "C" rmw_wait_set_t * rmw_create_wait_set(rmw_context_t * context, size_t 
   }
 
   {
-    std::lock_guard<std::mutex> lock(gcdds.lock);
+    std::lock_guard<std::mutex> lock(gcdds().lock);
     // Lazily create dummy guard condition
-    if (gcdds.waitsets.size() == 0) {
-      if ((gcdds.gc_for_empty_waitset = dds_create_guardcondition(DDS_CYCLONEDDS_HANDLE)) < 0) {
+    if (gcdds().waitsets.size() == 0) {
+      if ((gcdds().gc_for_empty_waitset = dds_create_guardcondition(DDS_CYCLONEDDS_HANDLE)) < 0) {
         RMW_SET_ERROR_MSG("failed to create guardcondition for handling empty waitsets");
         goto fail_create_dummy;
       }
     }
     // Attach never-triggered guard condition.  As it will never be triggered, it will never be
     // included in the result of dds_waitset_wait
-    if (dds_waitset_attach(ws->waitseth, gcdds.gc_for_empty_waitset, INTPTR_MAX) < 0) {
+    if (dds_waitset_attach(ws->waitseth, gcdds().gc_for_empty_waitset, INTPTR_MAX) < 0) {
       RMW_SET_ERROR_MSG("failed to attach dummy guard condition for blocking on empty waitset");
       goto fail_attach_dummy;
     }
-    gcdds.waitsets.insert(ws);
+    gcdds().waitsets.insert(ws);
   }
 
   return wait_set;
@@ -3230,11 +3265,11 @@ extern "C" rmw_ret_t rmw_destroy_wait_set(rmw_wait_set_t * wait_set)
   RET_NULL(ws);
   dds_delete(ws->waitseth);
   {
-    std::lock_guard<std::mutex> lock(gcdds.lock);
-    gcdds.waitsets.erase(ws);
-    if (gcdds.waitsets.size() == 0) {
-      dds_delete(gcdds.gc_for_empty_waitset);
-      gcdds.gc_for_empty_waitset = 0;
+    std::lock_guard<std::mutex> lock(gcdds().lock);
+    gcdds().waitsets.erase(ws);
+    if (gcdds().waitsets.size() == 0) {
+      dds_delete(gcdds().gc_for_empty_waitset);
+      gcdds().gc_for_empty_waitset = 0;
     }
   }
   RMW_TRY_DESTRUCTOR(ws->~CddsWaitset(), ws, result = RMW_RET_ERROR);
@@ -3305,8 +3340,8 @@ static void clean_waitset_caches()
      have been cached in a waitset), and drops all cached entities from all waitsets (just to keep
      life simple). I'm assuming one is not allowed to delete an entity while it is still being
      used ... */
-  std::lock_guard<std::mutex> lock(gcdds.lock);
-  for (auto && ws : gcdds.waitsets) {
+  std::lock_guard<std::mutex> lock(gcdds().lock);
+  for (auto && ws : gcdds().waitsets) {
     std::lock_guard<std::mutex> wslock(ws->lock);
     if (!ws->inuse) {
       waitset_detach(ws);
@@ -3825,13 +3860,22 @@ static const rosidl_service_type_support_t * get_service_typesupport(
   {
     return ts;
   } else {
+    rcutils_error_string_t prev_error_string = rcutils_get_error_string();
+    rcutils_reset_error();
     if ((ts =
       get_service_typesupport_handle(
         type_supports, rosidl_typesupport_introspection_cpp::typesupport_identifier)) != nullptr)
     {
       return ts;
     } else {
-      RMW_SET_ERROR_MSG("service type support not from this implementation");
+      rcutils_error_string_t error_string = rcutils_get_error_string();
+      rcutils_reset_error();
+      RMW_SET_ERROR_MSG_WITH_FORMAT_STRING(
+        "Service type support not from this implementation. Got:\n"
+        "    %s\n"
+        "    %s\n"
+        "while fetching it",
+        prev_error_string.str, error_string.str);
       return nullptr;
     }
   }
@@ -3936,22 +3980,22 @@ static rmw_ret_t rmw_init_cs(
   RCUTILS_LOG_DEBUG_NAMED("rmw_cyclonedds_cpp", "***********");
 
   dds_entity_t pubtopic, subtopic;
-  struct sertopic_rmw * pub_st, * sub_st;
+  struct sertype_rmw * pub_st, * sub_st;
 
-  pub_st = create_sertopic(
+  pub_st = create_sertype(
     pubtopic_name.c_str(), type_support->typesupport_identifier, pub_type_support, true,
     std::move(pub_msg_ts));
-  struct ddsi_sertopic * pub_stact;
-  pubtopic = create_topic(node->context->impl->ppant, pub_st, &pub_stact);
+  struct ddsi_sertype * pub_stact;
+  pubtopic = create_topic(node->context->impl->ppant, pubtopic_name.c_str(), pub_st, &pub_stact);
   if (pubtopic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
     goto fail_pubtopic;
   }
 
-  sub_st = create_sertopic(
+  sub_st = create_sertype(
     subtopic_name.c_str(), type_support->typesupport_identifier, sub_type_support, true,
     std::move(sub_msg_ts));
-  subtopic = create_topic(node->context->impl->ppant, sub_st);
+  subtopic = create_topic(node->context->impl->ppant, subtopic_name.c_str(), sub_st);
   if (subtopic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
     goto fail_subtopic;
@@ -3980,7 +4024,7 @@ static rmw_ret_t rmw_init_cs(
     goto fail_writer;
   }
   get_entity_gid(pub->enth, pub->gid);
-  pub->sertopic = pub_stact;
+  pub->sertype = pub_stact;
   if ((sub->enth = dds_create_reader(node->context->impl->dds_sub, subtopic, qos, nullptr)) < 0) {
     RMW_SET_ERROR_MSG("failed to create reader");
     goto fail_reader;
