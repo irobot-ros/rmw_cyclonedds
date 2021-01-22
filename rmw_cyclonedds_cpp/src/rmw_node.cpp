@@ -450,15 +450,15 @@ extern "C" rmw_ret_t rmw_set_log_severity(rmw_log_severity_t severity)
 }
 
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
-  const void * user_data,
+  rmw_subscription_t * rmw_subscription,
   rmw_listener_cb_t callback,
-  const void * subscription_handle,
-  rmw_subscription_t * rmw_subscription)
+  const void * user_data,
+  const void * subscription_handle)
 {
-  (void)user_data;
-  (void)callback;
-  (void)subscription_handle;
   (void)rmw_subscription;
+  (void)callback;
+  (void)user_data;
+  (void)subscription_handle;
   // auto subscription = static_cast<CddsSubscription *>(rmw_subscription->data);
   // subscription->setCallback(user_data, callback, subscription_handle);
   RCUTILS_LOG_ERROR_NAMED(
@@ -468,15 +468,15 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
-  const void * user_data,
+  rmw_service_t * rmw_service,
   rmw_listener_cb_t callback,
-  const void * service_handle,
-  rmw_service_t * rmw_service)
+  const void * user_data,
+  const void * service_handle)
 {
-  (void)user_data;
-  (void)callback;
-  (void)service_handle;
   (void)rmw_service;
+  (void)callback;
+  (void)user_data;
+  (void)service_handle;
   // auto service = static_cast<CddsService *>(rmw_service->data);
   // service->setCallback(user_data, callback, service_handle);
   RCUTILS_LOG_ERROR_NAMED(
@@ -486,15 +486,15 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
-  const void * user_data,
+  rmw_client_t * rmw_client,
   rmw_listener_cb_t callback,
-  const void * client_handle,
-  rmw_client_t * rmw_client)
+  const void * user_data,
+  const void * client_handle)
 {
-  (void)user_data;
-  (void)callback;
-  (void)client_handle;
   (void)rmw_client;
+  (void)callback;
+  (void)user_data;
+  (void)client_handle;
   // auto client = static_cast<CddsClient *>(rmw_client->data);
   // client->setCallback(user_data, callback, client_handle);
   RCUTILS_LOG_ERROR_NAMED(
@@ -504,10 +504,10 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 }
 
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
-  const void * user_data,
-  rmw_listener_cb_t callback,
-  const void * guard_condition_handle,
   rmw_guard_condition_t * rmw_guard_condition,
+  rmw_listener_cb_t callback,
+  const void * user_data,
+  const void * guard_condition_handle,
   bool use_previous_events)
 {
   (void)user_data;
