@@ -451,7 +451,7 @@ extern "C" rmw_ret_t rmw_set_log_severity(rmw_log_severity_t severity)
 
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   rmw_subscription_t * rmw_subscription,
-  rmw_listener_cb_t callback,
+  rmw_listener_callback_t callback,
   const void * user_data,
   const void * subscription_handle)
 {
@@ -469,7 +469,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
   rmw_service_t * rmw_service,
-  rmw_listener_cb_t callback,
+  rmw_listener_callback_t callback,
   const void * user_data,
   const void * service_handle)
 {
@@ -487,7 +487,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
 
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
   rmw_client_t * rmw_client,
-  rmw_listener_cb_t callback,
+  rmw_listener_callback_t callback,
   const void * user_data,
   const void * client_handle)
 {
@@ -505,7 +505,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   rmw_guard_condition_t * rmw_guard_condition,
-  rmw_listener_cb_t callback,
+  rmw_listener_callback_t callback,
   const void * user_data,
   const void * guard_condition_handle,
   bool use_previous_events)
@@ -526,7 +526,7 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
 
 extern "C" rmw_ret_t rmw_event_set_events_listener_callback(
   const void * user_data,
-  rmw_listener_cb_t callback,
+  rmw_listener_callback_t callback,
   const void * waitable_handle,
   rmw_event_t * rmw_event,
   bool use_previous_events)
