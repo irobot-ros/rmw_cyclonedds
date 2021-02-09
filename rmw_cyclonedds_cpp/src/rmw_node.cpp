@@ -488,14 +488,19 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
         user_callback(..);
       }
   */
-
-  // Set the user callback data
+  // Set the user callback data (if valid)
   user_callback_data_t * data = &(sub->user_callback_data);
 
-  data->callback = callback;
-  data->user_data = user_data;
-  data->event_type = SUBSCRIPTION_EVENT;
-  data->entity_handle = subscription_handle;
+  if(user_data && subscription_handle && callback)
+  {
+    data->callback = callback;
+    data->user_data = user_data;
+    data->event_type = SUBSCRIPTION_EVENT;
+    data->entity_handle = subscription_handle;
+  } else {
+    // Unset callback: If any of the pointers is NULL, do not use callback.
+    return dds_set_listener(sub->enth, NULL);
+  }
 
   // Create a listener which will use the user data as
   // its callback argument
@@ -551,25 +556,50 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   const void * guard_condition_handle,
   bool use_previous_events)
 {
-  (void)user_data;
-  (void)callback;
-  (void)guard_condition_handle;
-  (void)rmw_guard_condition;
-  (void)use_previous_events;
-  // auto guard_condition = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
-  // guard_condition->setCallback(user_data, callback,
-  //                              guard_condition_handle, use_previous_events);
-  RCUTILS_LOG_ERROR_NAMED(
-    "rmw_node.cpp",
-    "rmw_guard_condition_set_listener_callback: not supported (yet)");
-  return RMW_RET_UNSUPPORTED;
+  auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
+
+  // Here we set the callback to be called from inside the DDS callback
+  /*
+      dds_listener_callback(..) {
+        user_callback(..);
+      }
+  */
+
+  // Set the user callback data
+  user_callback_data_t * data = &(gc->user_callback_data);
+
+  if(user_data && guard_condition_handle && callback)
+  {
+    data->callback = callback;
+    data->user_data = user_data;
+    data->event_type = WAITABLE_EVENT;
+    data->entity_handle = guard_condition_handle;
+  } else {
+    // Unset callback: If any of the pointers is NULL, do not use callback.
+    return dds_set_listener(gc->gcondh, NULL);
+  }
+
+  // Create a listener which will use the user data
+  // as argument when calling its callback
+  gc->listener = dds_create_listener(data);
+
+  // Assign the DDS listener callback to the
+  // guard condition listener
+  dds_lset_data_on_readers(gc->listener, dds_listener_callback);
+
+  // Finally attach the listener to the guard condition
+  // Commented out because the listener doesn't seem to listen
+  // when the guard condition is triggered!
+
+  // return dds_set_listener(gc->gcondh, gc->listener);
+  return RMW_RET_OK;
 }
 
-extern "C" rmw_ret_t rmw_event_set_events_listener_callback(
-  const void * user_data,
-  rmw_listener_callback_t callback,
-  const void * waitable_handle,
+extern "C" rmw_ret_t rmw_event_set_listener_callback(
   rmw_event_t * rmw_event,
+  rmw_listener_callback_t callback,
+  const void * user_data,
+  const void * waitable_handle,
   bool use_previous_events)
 {
   (void)user_data;
@@ -578,12 +608,7 @@ extern "C" rmw_ret_t rmw_event_set_events_listener_callback(
   (void)rmw_event;
   (void)use_previous_events;
   // auto event = static_cast<CddsEvent *>(rmw_event->data);
-  // event->setCallback(user_data, callback,
-  //                              waitable_handle, use_previous_events);
-  RCUTILS_LOG_ERROR_NAMED(
-    "rmw_node.cpp",
-    "rmw_event_set_events_listener_callback: not supported (yet)");
-  return RMW_RET_UNSUPPORTED;
+  return RMW_RET_OK;
 }
 
 extern "C" rmw_ret_t rmw_init_options_init(
@@ -3234,6 +3259,14 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   RET_WRONG_IMPLID(guard_condition_handle);
   auto * gcond_impl = static_cast<CddsGuardCondition *>(guard_condition_handle->data);
   dds_set_guardcondition(gcond_impl->gcondh, true);
+
+  dds_on_data_on_readers_fn user_callback;
+  dds_lget_data_on_readers(gcond_impl->listener, &user_callback);
+
+  if(user_callback) {
+    user_callback(gcond_impl->gcondh, (void *)&gcond_impl->user_callback_data);
+  }
+
   return RMW_RET_OK;
 }
 
