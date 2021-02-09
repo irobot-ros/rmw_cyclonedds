@@ -341,10 +341,19 @@ struct CddsPublisher : CddsEntity
   struct ddsi_sertype * sertype;
 };
 
+struct user_callback_data_t {
+  rmw_listener_callback_t callback;
+  rmw_listener_event_type_t event_type;
+  const void * user_data;
+  const void * entity_handle;
+};
+
 struct CddsSubscription : CddsEntity
 {
   rmw_gid_t gid;
   dds_entity_t rdcondh;
+  dds_listener_t * listener;
+  user_callback_data_t user_callback_data;
 };
 
 struct client_service_id_t
@@ -380,6 +389,8 @@ struct CddsService
 struct CddsGuardCondition
 {
   dds_entity_t gcondh;
+  dds_listener_t * listener;
+  user_callback_data_t user_callback_data;
 };
 
 struct CddsEvent : CddsEntity
@@ -449,22 +460,52 @@ extern "C" rmw_ret_t rmw_set_log_severity(rmw_log_severity_t severity)
   return RMW_RET_OK;
 }
 
+static void dds_listener_callback(dds_entity_t entity, void * arg)
+{
+  // Currently we don't use the entity which calls this callback.
+  // We need the dds_entity_t arg just to comply with the function pointer
+  // signature of 'dds_on_data_on_readers_fn' defined on dds_public_listener.h
+  (void)entity;
+
+  // Cast the listener callback arg to user callback data.
+  struct user_callback_data_t * data = (user_callback_data_t *) arg;
+
+  // Call the user callback
+  data->callback(data->user_data, { data->entity_handle, data->event_type });
+}
+
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   rmw_subscription_t * rmw_subscription,
   rmw_listener_callback_t callback,
   const void * user_data,
   const void * subscription_handle)
 {
-  (void)rmw_subscription;
-  (void)callback;
-  (void)user_data;
-  (void)subscription_handle;
-  // auto subscription = static_cast<CddsSubscription *>(rmw_subscription->data);
-  // subscription->setCallback(user_data, callback, subscription_handle);
-  RCUTILS_LOG_ERROR_NAMED(
-    "rmw_node.cpp",
-    "rmw_subscription_set_listener_callback: not supported (yet)");
-  return RMW_RET_UNSUPPORTED;
+  auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
+
+  // Here we set the callback to be called from inside the DDS callback
+  /*
+      dds_listener_callback(..) {
+        user_callback(..);
+      }
+  */
+
+  // Set the user callback data
+  user_callback_data_t * data = &(sub->user_callback_data);
+
+  data->callback = callback;
+  data->user_data = user_data;
+  data->event_type = SUBSCRIPTION_EVENT;
+  data->entity_handle = subscription_handle;
+
+  // Create a listener which will use the user data as
+  // its callback argument
+  sub->listener = dds_create_listener(data);
+
+  // Assign the DDS listener callback to the subscription listener
+  dds_lset_data_on_readers(sub->listener, dds_listener_callback);
+
+  // Finally attach the listener to the subscription
+  return dds_set_listener(sub->enth, sub->listener);
 }
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
