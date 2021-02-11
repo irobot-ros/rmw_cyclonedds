@@ -342,7 +342,8 @@ struct CddsPublisher : CddsEntity
   struct ddsi_sertype * sertype;
 };
 
-struct user_callback_data_t {
+struct user_callback_data_t
+{
   rmw_listener_callback_t callback;
   rmw_listener_event_type_t event_type;
   const void * user_data;
@@ -475,10 +476,13 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
   (void)entity;
 
   // Cast the listener callback arg to user callback data.
-  struct user_callback_data_t * data = (user_callback_data_t *) arg;
+  struct user_callback_data_t * data;
+  data = static_cast<user_callback_data_t *>(arg);
 
   // Call the user callback
-  data->callback(data->user_data, { data->entity_handle, data->event_type });
+  data->callback(
+    data->user_data,
+    {data->entity_handle, data->event_type});
 }
 
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
@@ -502,8 +506,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(sub->user_callback_data);
 
-  if(user_data && subscription_handle && callback)
-  {
+  if (user_data && subscription_handle && callback) {
     data->callback = callback;
     data->user_data = user_data;
     data->event_type = SUBSCRIPTION_EVENT;
@@ -546,8 +549,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(srv->user_callback_data);
 
-  if(user_data && service_handle && callback)
-  {
+  if (user_data && service_handle && callback) {
     data->callback = callback;
     data->user_data = user_data;
     data->event_type = SERVICE_EVENT;
@@ -590,8 +592,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(cli->user_callback_data);
 
-  if(user_data && client_handle && callback)
-  {
+  if (user_data && client_handle && callback) {
     data->callback = callback;
     data->user_data = user_data;
     data->event_type = CLIENT_EVENT;
@@ -635,8 +636,7 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   // Set the user callback data
   user_callback_data_t * data = &(gc->user_callback_data);
 
-  if(user_data && guard_condition_handle && callback)
-  {
+  if (user_data && guard_condition_handle && callback) {
     data->callback = callback;
     data->user_data = user_data;
     data->event_type = WAITABLE_EVENT;
@@ -697,7 +697,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   //   rmw_ret_t ret = dds_get_listener(entity_to_listen, listener);
 
   // If we have a listener assigned to the event, return
-  if(dds_event->listener) {
+  if (dds_event->listener) {
     return RMW_RET_OK;
   }
 
@@ -706,8 +706,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(dds_event->user_callback_data);
 
-  if(user_data && waitable_handle && callback)
-  {
+  if (user_data && waitable_handle && callback) {
     data->callback = callback;
     data->user_data = user_data;
     data->event_type = WAITABLE_EVENT;
@@ -3382,8 +3381,10 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   dds_on_data_on_readers_fn user_callback;
   dds_lget_data_on_readers(gcond_impl->listener, &user_callback);
 
-  if(user_callback) {
-    user_callback(gcond_impl->gcondh, (void *)&gcond_impl->user_callback_data);
+  if (user_callback) {
+    user_callback(
+      gcond_impl->gcondh,
+      static_cast<void *>(&gcond_impl->user_callback_data));
   }
 
   return RMW_RET_OK;
