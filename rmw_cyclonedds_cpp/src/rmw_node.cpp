@@ -379,11 +379,15 @@ struct CddsClient
   dds_time_t lastcheck;
   std::map<int64_t, dds_time_t> reqtime;
 #endif
+  dds_listener_t * listener;
+  user_callback_data_t user_callback_data;
 };
 
 struct CddsService
 {
   CddsCS service;
+  dds_listener_t * listener;
+  user_callback_data_t user_callback_data;
 };
 
 struct CddsGuardCondition
@@ -396,6 +400,8 @@ struct CddsGuardCondition
 struct CddsEvent : CddsEntity
 {
   rmw_event_type_t event_type;
+  dds_listener_t * listener;
+  user_callback_data_t user_callback_data;
 };
 
 struct CddsWaitset
@@ -481,13 +487,17 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   const void * subscription_handle)
 {
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
+  auto entity_to_listen = sub->enth;
 
-  // Here we set the callback to be called from inside the DDS callback
+  // This API sets two callbacks:
+  // 1. The DDS subscription's listener callback.
+  // 2. The user callback, called from the listener callback.
   /*
       dds_listener_callback(..) {
         user_callback(..);
       }
   */
+
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(sub->user_callback_data);
 
@@ -498,8 +508,8 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
     data->event_type = SUBSCRIPTION_EVENT;
     data->entity_handle = subscription_handle;
   } else {
-    // Unset callback: If any of the pointers is NULL, do not use callback.
-    return dds_set_listener(sub->enth, NULL);
+    // Unset callback: If any of the pointers is NULL, do not set callback.
+    return dds_set_listener(entity_to_listen, NULL);
   }
 
   // Create a listener which will use the user data as
@@ -510,7 +520,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   dds_lset_data_on_readers(sub->listener, dds_listener_callback);
 
   // Finally attach the listener to the subscription
-  return dds_set_listener(sub->enth, sub->listener);
+  return dds_set_listener(entity_to_listen, sub->listener);
 }
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
@@ -519,16 +529,41 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   const void * user_data,
   const void * service_handle)
 {
-  (void)rmw_service;
-  (void)callback;
-  (void)user_data;
-  (void)service_handle;
-  // auto service = static_cast<CddsService *>(rmw_service->data);
-  // service->setCallback(user_data, callback, service_handle);
-  RCUTILS_LOG_ERROR_NAMED(
-    "rmw_node.cpp",
-    "rmw_service_set_listener_callback: not supported (yet)");
-  return RMW_RET_UNSUPPORTED;
+  auto srv = static_cast<CddsService *>(rmw_service->data);
+  auto entity_to_listen = srv->service.sub->enth;
+
+  // This API sets two callbacks:
+  // 1. The DDS service's listener callback.
+  // 2. The user callback, called from the listener callback.
+  /*
+      dds_listener_callback(..) {
+        user_callback(..);
+      }
+  */
+
+  // Set the user callback data (if valid)
+  user_callback_data_t * data = &(srv->user_callback_data);
+
+  if(user_data && service_handle && callback)
+  {
+    data->callback = callback;
+    data->user_data = user_data;
+    data->event_type = SERVICE_EVENT;
+    data->entity_handle = service_handle;
+  } else {
+    // Unset callback: If any of the pointers is NULL, do not set callback.
+    return dds_set_listener(entity_to_listen, NULL);
+  }
+
+  // Create a listener which will use the user data as
+  // its callback argument
+  srv->listener = dds_create_listener(data);
+
+  // Assign the DDS listener callback to the service listener
+  dds_lset_data_on_readers(srv->listener, dds_listener_callback);
+
+  // Finally attach the listener to the service
+  return dds_set_listener(entity_to_listen, srv->listener);
 }
 
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
@@ -537,16 +572,41 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   const void * user_data,
   const void * client_handle)
 {
-  (void)rmw_client;
-  (void)callback;
-  (void)user_data;
-  (void)client_handle;
-  // auto client = static_cast<CddsClient *>(rmw_client->data);
-  // client->setCallback(user_data, callback, client_handle);
-  RCUTILS_LOG_ERROR_NAMED(
-    "rmw_node.cpp",
-    "rmw_client_set_listener_callback: not supported (yet)");
-  return RMW_RET_UNSUPPORTED;
+  auto cli = static_cast<CddsClient *>(rmw_client->data);
+  auto entity_to_listen = cli->client.sub->enth;
+
+  // This API sets two callbacks:
+  // 1. The DDS client's listener callback.
+  // 2. The user callback, called from the listener callback.
+  /*
+      dds_listener_callback(..) {
+        user_callback(..);
+      }
+  */
+
+  // Set the user callback data (if valid)
+  user_callback_data_t * data = &(cli->user_callback_data);
+
+  if(user_data && client_handle && callback)
+  {
+    data->callback = callback;
+    data->user_data = user_data;
+    data->event_type = CLIENT_EVENT;
+    data->entity_handle = client_handle;
+  } else {
+    // Unset callback: If any of the pointers is NULL, do not set callback.
+    return dds_set_listener(entity_to_listen, NULL);
+  }
+
+  // Create a listener which will use the user data as
+  // its callback argument
+  cli->listener = dds_create_listener(data);
+
+  // Assign the DDS listener callback to the client listener
+  dds_lset_data_on_readers(cli->listener, dds_listener_callback);
+
+  // Finally attach the listener to the client
+  return dds_set_listener(entity_to_listen, cli->listener);
 }
 
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
@@ -557,8 +617,11 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   bool use_previous_events)
 {
   auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
+  auto entity_to_listen = gc->gcondh;
 
-  // Here we set the callback to be called from inside the DDS callback
+  // This API sets two callbacks:
+  // 1. The DDS guard condition's listener callback.
+  // 2. The user callback, called from the listener callback.
   /*
       dds_listener_callback(..) {
         user_callback(..);
@@ -575,8 +638,8 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
     data->event_type = WAITABLE_EVENT;
     data->entity_handle = guard_condition_handle;
   } else {
-    // Unset callback: If any of the pointers is NULL, do not use callback.
-    return dds_set_listener(gc->gcondh, NULL);
+    // Unset callback: If any of the pointers is NULL, do not set callback.
+    return dds_set_listener(entity_to_listen, NULL);
   }
 
   // Create a listener which will use the user data
@@ -588,11 +651,8 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   dds_lset_data_on_readers(gc->listener, dds_listener_callback);
 
   // Finally attach the listener to the guard condition
-  // Commented out because the listener doesn't seem to listen
-  // when the guard condition is triggered!
-
-  // return dds_set_listener(gc->gcondh, gc->listener);
-  return RMW_RET_OK;
+  // NOTE: The listener doesn't seem to listen when the guard condition is triggered!
+  return dds_set_listener(entity_to_listen, gc->listener);
 }
 
 extern "C" rmw_ret_t rmw_event_set_listener_callback(
@@ -602,12 +662,44 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   const void * waitable_handle,
   bool use_previous_events)
 {
-  (void)user_data;
-  (void)callback;
-  (void)waitable_handle;
-  (void)rmw_event;
-  (void)use_previous_events;
   // auto event = static_cast<CddsEvent *>(rmw_event->data);
+  // auto entity_to_listen = event->enth;
+
+
+  // This API sets two callbacks:
+  // 1. The DDS event's listener callback.
+  // 2. The user callback, called from the listener callback.
+  /*
+      dds_listener_callback(..) {
+        user_callback(..);
+      }
+  */
+
+  // // Set the user callback data (if valid)
+  // user_callback_data_t * data = &(event->user_callback_data);
+
+  // if(user_data && waitable_handle && callback)
+  // {
+  //   data->callback = callback;
+  //   data->user_data = user_data;
+  //   data->event_type = WAITABLE_EVENT;
+  //   data->entity_handle = waitable_handle;
+  // } else {
+  //   // Unset callback: If any of the pointers is NULL, do not set callback.
+  //   return dds_set_listener(entity_to_listen, NULL);
+  // }
+
+  // // Create a listener which will use the user data as
+  // // its callback argument
+  // event->listener = dds_create_listener(data);
+
+  // // Assign the DDS listener callback to the event listener
+  // dds_lset_data_on_readers(event->listener, dds_listener_callback);
+
+  // // Finally attach the listener to the event
+
+  // return dds_set_listener(entity_to_listen, event->listener);
+
   return RMW_RET_OK;
 }
 
@@ -3260,6 +3352,8 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   auto * gcond_impl = static_cast<CddsGuardCondition *>(guard_condition_handle->data);
   dds_set_guardcondition(gcond_impl->gcondh, true);
 
+  // Hack: Get and call the guard condition's listener callback,
+  // as it doesn't seem to be listening to the proper enitity.
   dds_on_data_on_readers_fn user_callback;
   dds_lget_data_on_readers(gcond_impl->listener, &user_callback);
 
