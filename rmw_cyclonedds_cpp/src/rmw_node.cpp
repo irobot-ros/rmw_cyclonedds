@@ -354,7 +354,7 @@ struct CddsSubscription : CddsEntity
 {
   rmw_gid_t gid;
   dds_entity_t rdcondh;
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener;
   user_callback_data_t user_callback_data;
 };
 
@@ -381,21 +381,21 @@ struct CddsClient
   dds_time_t lastcheck;
   std::map<int64_t, dds_time_t> reqtime;
 #endif
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener;
   user_callback_data_t user_callback_data;
 };
 
 struct CddsService
 {
   CddsCS service;
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener;
   user_callback_data_t user_callback_data;
 };
 
 struct CddsGuardCondition
 {
   dds_entity_t gcondh;
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener;
   user_callback_data_t user_callback_data;
 };
 
@@ -492,16 +492,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   const void * subscription_handle)
 {
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
-  auto entity_to_listen = sub->enth;
-
-  // This API sets two callbacks:
-  // 1. The DDS subscription's listener callback.
-  // 2. The user callback, called from the listener callback.
-  /*
-      dds_listener_callback(..) {
-        user_callback(..);
-      }
-  */
+  dds_entity_t entity_to_listen = sub->enth;
 
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(sub->user_callback_data);
@@ -535,16 +526,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   const void * service_handle)
 {
   auto srv = static_cast<CddsService *>(rmw_service->data);
-  auto entity_to_listen = srv->service.sub->enth;
-
-  // This API sets two callbacks:
-  // 1. The DDS service's listener callback.
-  // 2. The user callback, called from the listener callback.
-  /*
-      dds_listener_callback(..) {
-        user_callback(..);
-      }
-  */
+  dds_entity_t entity_to_listen = srv->service.sub->enth;
 
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(srv->user_callback_data);
@@ -578,16 +560,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   const void * client_handle)
 {
   auto cli = static_cast<CddsClient *>(rmw_client->data);
-  auto entity_to_listen = cli->client.sub->enth;
-
-  // This API sets two callbacks:
-  // 1. The DDS client's listener callback.
-  // 2. The user callback, called from the listener callback.
-  /*
-      dds_listener_callback(..) {
-        user_callback(..);
-      }
-  */
+  dds_entity_t entity_to_listen = cli->client.sub->enth;
 
   // Set the user callback data (if valid)
   user_callback_data_t * data = &(cli->user_callback_data);
@@ -622,16 +595,7 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   bool use_previous_events)
 {
   auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
-  auto entity_to_listen = gc->gcondh;
-
-  // This API sets two callbacks:
-  // 1. The DDS guard condition's listener callback.
-  // 2. The user callback, called from the listener callback.
-  /*
-      dds_listener_callback(..) {
-        user_callback(..);
-      }
-  */
+  dds_entity_t entity_to_listen = gc->gcondh;
 
   // Set the user callback data
   user_callback_data_t * data = &(gc->user_callback_data);
@@ -670,16 +634,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   bool use_previous_events)
 {
   auto dds_event = static_cast<CddsEvent *>(rmw_event->data);
-  auto entity_to_listen = dds_event->enth;
-
-  // This API sets two callbacks:
-  // 1. The DDS event's listener callback.
-  // 2. The user callback, called from the listener callback.
-  /*
-      dds_listener_callback(..) {
-        user_callback(..);
-      }
-  */
+  dds_entity_t entity_to_listen = dds_event->enth;
 
   // Seems there is a dds_event for each dds_subscription,
   // and they share the same `enth`, so:
