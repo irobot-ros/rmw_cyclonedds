@@ -396,7 +396,9 @@ struct CddsGuardCondition
 {
   dds_entity_t gcondh;
   dds_listener_t * listener;
+  std::mutex gc_mutex;
   user_callback_data_t user_callback_data;
+  size_t unread_count = 0;
 };
 
 struct CddsEvent : CddsEntity
@@ -578,6 +580,10 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   bool use_previous_events)
 {
   auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
+
+  // Lock guard condition mutex
+  std::lock_guard<std::mutex> lock(gc->gc_mutex);
+
   dds_entity_t entity_to_listen = gc->gcondh;
 
   // Set the user callback data
@@ -590,7 +596,18 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
 
   if (callback) {
     gc->listener = dds_create_listener(data);
-    dds_lset_data_on_readers(gc->listener, dds_listener_callback);
+    dds_lset_data_available(gc->listener, dds_listener_callback);
+
+    // Push events arrived before setting the executor's callback
+    if (use_previous_events) {
+      for(size_t i = 0; i < gc->unread_count; i++) {
+        callback(user_data, { guard_condition_handle, WAITABLE_EVENT });
+      }
+
+      // Reset unread count
+      gc->unread_count = 0;
+    }
+
     return dds_set_listener(entity_to_listen, gc->listener);
   } else {
     // Unset callback: If the user callback pointer is NULL,
@@ -3296,20 +3313,31 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   RET_NULL(guard_condition_handle);
   RET_WRONG_IMPLID(guard_condition_handle);
   auto * gcond_impl = static_cast<CddsGuardCondition *>(guard_condition_handle->data);
-  dds_set_guardcondition(gcond_impl->gcondh, true);
+  dds_return_t ret;
 
-  // Hack: Get and call the guard condition's listener callback,
-  // as it doesn't seem to be listening to the proper entity.
-  dds_on_data_on_readers_fn user_callback;
-  dds_lget_data_on_readers(gcond_impl->listener, &user_callback);
+  ret = dds_set_guardcondition(gcond_impl->gcondh, true);
 
-  if (user_callback) {
-    user_callback(
-      gcond_impl->gcondh,
-      static_cast<void *>(&gcond_impl->user_callback_data));
+  if (ret == DDS_RETCODE_OK) {
+    // Lock guard condition mutex
+    std::lock_guard<std::mutex> lock(gcond_impl->gc_mutex);
+
+    // Get and call the guard condition's listener callback
+    dds_on_data_available_fn user_callback;
+    dds_lget_data_available(gcond_impl->listener, &user_callback);
+
+    if (user_callback) {
+      user_callback(
+        gcond_impl->gcondh,
+        static_cast<void *>(&gcond_impl->user_callback_data));
+    } else {
+      // Increment unread count
+      gcond_impl->unread_count++;
+    }
+
+    return RMW_RET_OK;
   }
 
-  return RMW_RET_OK;
+  return ret;
 }
 
 extern "C" rmw_wait_set_t * rmw_create_wait_set(rmw_context_t * context, size_t max_conditions)
