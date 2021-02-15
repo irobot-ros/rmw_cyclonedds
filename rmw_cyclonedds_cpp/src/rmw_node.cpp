@@ -501,12 +501,12 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   data->event_type = SUBSCRIPTION_EVENT;
   data->entity_handle = subscription_handle;
 
-  if (user_data && subscription_handle && callback) {
+  if (callback) {
     sub->listener = dds_create_listener(data);
     dds_lset_data_on_readers(sub->listener, dds_listener_callback);
     return dds_set_listener(entity_to_listen, sub->listener);
   } else {
-    // Unset callback: If any of the user callback pointers is NULL,
+    // Unset callback: If the user callback pointer is NULL,
     // assign a NULL listener to the entity.
     return dds_set_listener(entity_to_listen, NULL);
   }
@@ -529,12 +529,12 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   data->event_type = SERVICE_EVENT;
   data->entity_handle = service_handle;
 
-  if (user_data && service_handle && callback) {
+  if (callback) {
     srv->listener = dds_create_listener(data);
     dds_lset_data_on_readers(srv->listener, dds_listener_callback);
     return dds_set_listener(entity_to_listen, srv->listener);
   } else {
-    // Unset callback: If any of the user callback pointers is NULL,
+    // Unset callback: If the user callback pointer is NULL,
     // assign a NULL listener to the entity.
     return dds_set_listener(entity_to_listen, NULL);
   }
@@ -558,12 +558,12 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   data->event_type = CLIENT_EVENT;
   data->entity_handle = client_handle;
 
-  if (user_data && client_handle && callback) {
+  if (callback) {
     cli->listener = dds_create_listener(data);
     dds_lset_data_on_readers(cli->listener, dds_listener_callback);
     return dds_set_listener(entity_to_listen, cli->listener);
   } else {
-    // Unset callback: If any of the user callback pointers is NULL,
+    // Unset callback: If the user callback pointer is NULL,
     // assign a NULL listener to the entity.
     return dds_set_listener(entity_to_listen, NULL);
   }
@@ -587,15 +587,12 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   data->event_type = WAITABLE_EVENT;
   data->entity_handle = guard_condition_handle;
 
-  if (user_data && guard_condition_handle && callback) {
+  if (callback) {
     gc->listener = dds_create_listener(data);
     dds_lset_data_on_readers(gc->listener, dds_listener_callback);
-    // NOTE: The listener doesn't seem to listen when the guard condition is triggered!
-    // so there's a hack on rmw_trigger_guard_condition() to call the callback
-    // manually
     return dds_set_listener(entity_to_listen, gc->listener);
   } else {
-    // Unset callback: If any of the user callback pointers is NULL,
+    // Unset callback: If the user callback pointer is NULL,
     // assign a NULL listener to the entity.
     return dds_set_listener(entity_to_listen, NULL);
   }
@@ -641,12 +638,12 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   data->event_type = WAITABLE_EVENT;
   data->entity_handle = waitable_handle;
 
-  if (user_data && waitable_handle && callback) {
+  if (callback) {
     dds_event->listener = dds_create_listener(data);
     dds_lset_data_on_readers(dds_event->listener, dds_listener_callback);
     return dds_set_listener(entity_to_listen, dds_event->listener);
   } else {
-    // Unset callback: If any of the user callback pointers is NULL,
+    // Unset callback: If the user callback pointer is NULL,
     // assign a NULL listener to the entity.
     return dds_set_listener(entity_to_listen, NULL);
   }
