@@ -355,6 +355,7 @@ struct CddsSubscription : CddsEntity
   dds_entity_t rdcondh;
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  size_t unread_count = 0;
 };
 
 struct client_service_id_t
@@ -382,6 +383,7 @@ struct CddsClient
 #endif
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  size_t unread_count = 0;
 };
 
 struct CddsService
@@ -389,6 +391,7 @@ struct CddsService
   CddsCS service;
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  size_t unread_count = 0;
 };
 
 struct CddsGuardCondition
@@ -405,6 +408,7 @@ struct CddsEvent : CddsEntity
   rmw_event_type_t event_type;
   dds_listener_t * listener = nullptr;
   user_callback_data_t user_callback_data;
+  size_t unread_count = 0;
 };
 
 struct CddsWaitset
@@ -506,6 +510,14 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   if (callback) {
     sub->listener = dds_create_listener(data);
     dds_lset_data_on_readers(sub->listener, dds_listener_callback);
+
+    // Push events happened before having assigned a callback
+    for(size_t i = 0; i < sub->unread_count; i++) {
+      callback(user_data, { subscription_handle, SUBSCRIPTION_EVENT });
+    }
+
+    sub->unread_count = 0;
+
     return dds_set_listener(entity_to_listen, sub->listener);
   } else {
     // Unset callback: If the user callback pointer is NULL,
@@ -534,6 +546,14 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   if (callback) {
     srv->listener = dds_create_listener(data);
     dds_lset_data_on_readers(srv->listener, dds_listener_callback);
+
+    // Push events happened before having assigned a callback
+    for(size_t i = 0; i < srv->unread_count; i++) {
+      callback(user_data, { service_handle, SERVICE_EVENT });
+    }
+
+    srv->unread_count = 0;
+
     return dds_set_listener(entity_to_listen, srv->listener);
   } else {
     // Unset callback: If the user callback pointer is NULL,
@@ -563,6 +583,14 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   if (callback) {
     cli->listener = dds_create_listener(data);
     dds_lset_data_on_readers(cli->listener, dds_listener_callback);
+
+    // Push events happened before having assigned a callback
+    for(size_t i = 0; i < cli->unread_count; i++) {
+      callback(user_data, { client_handle, CLIENT_EVENT });
+    }
+
+    cli->unread_count = 0;
+
     return dds_set_listener(entity_to_listen, cli->listener);
   } else {
     // Unset callback: If the user callback pointer is NULL,
@@ -597,13 +625,12 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
     gc->listener = dds_create_listener(data);
     dds_lset_data_available(gc->listener, dds_listener_callback);
 
-    // Push events arrived before setting the executor's callback
     if (use_previous_events) {
+      // Push events happened before having assigned a callback
       for(size_t i = 0; i < gc->unread_count; i++) {
         callback(user_data, { guard_condition_handle, WAITABLE_EVENT });
       }
 
-      // Reset unread count
       gc->unread_count = 0;
     }
 
@@ -658,6 +685,16 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   if (callback) {
     dds_event->listener = dds_create_listener(data);
     dds_lset_data_on_readers(dds_event->listener, dds_listener_callback);
+
+    if (use_previous_events){
+      // Push events happened before having assigned a callback
+      for(size_t i = 0; i < dds_event->unread_count; i++) {
+        callback(user_data, { waitable_handle, WAITABLE_EVENT });
+      }
+
+      dds_event->unread_count = 0;
+    }
+
     return dds_set_listener(entity_to_listen, dds_event->listener);
   } else {
     // Unset callback: If the user callback pointer is NULL,
