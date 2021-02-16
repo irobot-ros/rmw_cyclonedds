@@ -126,6 +126,9 @@ using rmw_dds_common::msg::ParticipantEntitiesInfo;
 const char * const eclipse_cyclonedds_identifier = "rmw_cyclonedds_cpp";
 const char * const eclipse_cyclonedds_serialization_format = "cdr";
 
+static std::unordered_map<dds_entity_t, size_t> unread_count_map;
+
+
 /* instance handles are unsigned 64-bit integers carefully constructed to be as close to uniformly
    distributed as possible for no other reason than making them near-perfect hash keys, hence we can
    improve over the default hash function */
@@ -355,7 +358,6 @@ struct CddsSubscription : CddsEntity
   dds_entity_t rdcondh;
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
-  size_t unread_count = 0;
 };
 
 struct client_service_id_t
@@ -383,7 +385,6 @@ struct CddsClient
 #endif
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
-  size_t unread_count = 0;
 };
 
 struct CddsService
@@ -391,7 +392,6 @@ struct CddsService
   CddsCS service;
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
-  size_t unread_count = 0;
 };
 
 struct CddsGuardCondition
@@ -408,7 +408,6 @@ struct CddsEvent : CddsEntity
   rmw_event_type_t event_type;
   dds_listener_t * listener = nullptr;
   user_callback_data_t user_callback_data;
-  size_t unread_count = 0;
 };
 
 struct CddsWaitset
@@ -490,6 +489,30 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
     {data->entity_handle, data->event_type});
 }
 
+static void dds_non_init_listener_callback(dds_entity_t entity, void * arg)
+{
+  (void)arg;
+
+  auto it = unread_count_map.find(entity);
+
+  if (it != unread_count_map.end()) {
+    it->second++;
+  } else {
+   unread_count_map.emplace(entity, 1);
+  }
+}
+
+static size_t get_unread_count(dds_entity_t entity)
+{
+  auto it = unread_count_map.find(entity);
+
+  if (it != unread_count_map.end()) {
+    return it->second;
+  }
+
+  return 0;
+}
+
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   rmw_subscription_t * rmw_subscription,
   rmw_listener_callback_t callback,
@@ -512,11 +535,14 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
     dds_lset_data_on_readers(sub->listener, dds_listener_callback);
 
     // Push events happened before having assigned a callback
-    for(size_t i = 0; i < sub->unread_count; i++) {
+    size_t unread_count = get_unread_count(entity_to_listen);
+
+    // Remove from map since we won't use it anymore
+    unread_count_map.erase(entity_to_listen);
+
+    for(size_t i = 0; i < unread_count; i++) {
       callback(user_data, { subscription_handle, SUBSCRIPTION_EVENT });
     }
-
-    sub->unread_count = 0;
 
     return dds_set_listener(entity_to_listen, sub->listener);
   } else {
@@ -548,11 +574,14 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
     dds_lset_data_on_readers(srv->listener, dds_listener_callback);
 
     // Push events happened before having assigned a callback
-    for(size_t i = 0; i < srv->unread_count; i++) {
+    size_t unread_count = get_unread_count(entity_to_listen);
+
+    // Remove from map since we won't use it anymore
+    unread_count_map.erase(entity_to_listen);
+
+    for(size_t i = 0; i < unread_count; i++) {
       callback(user_data, { service_handle, SERVICE_EVENT });
     }
-
-    srv->unread_count = 0;
 
     return dds_set_listener(entity_to_listen, srv->listener);
   } else {
@@ -585,11 +614,14 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
     dds_lset_data_on_readers(cli->listener, dds_listener_callback);
 
     // Push events happened before having assigned a callback
-    for(size_t i = 0; i < cli->unread_count; i++) {
+    size_t unread_count = get_unread_count(entity_to_listen);
+
+    // Remove from map since we won't use it anymore
+    unread_count_map.erase(entity_to_listen);
+
+    for(size_t i = 0; i < unread_count; i++) {
       callback(user_data, { client_handle, CLIENT_EVENT });
     }
-
-    cli->unread_count = 0;
 
     return dds_set_listener(entity_to_listen, cli->listener);
   } else {
@@ -657,22 +689,8 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   //     dds_event->enth = dds_subscription->enth
   // So setting callbacks to this event overrides the
   // callbacks already set for the subscription.
-  // For now, we'll check if the event doesn't have an
-  // associated listener we'll assign one here.
-
-  // First, lets check if we don't have already a listener.
-
-  // Note: using dds_get_listener(..) when there's no listener
-  // results in a segfault.
-  //   dds_listener_t * listener;
-  //   rmw_ret_t ret = dds_get_listener(entity_to_listen, listener);
-
-  // If we have a listener assigned to the event, return
-  if (dds_event->listener) {
-    return RMW_RET_OK;
-  }
-
-  // This event doesn't have a listener, lets assign one
+  // For now, we'll just not support events
+  return RMW_RET_OK;
 
   // Set the user callback data
   user_callback_data_t * data = &(dds_event->user_callback_data);
@@ -687,12 +705,15 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     dds_lset_data_on_readers(dds_event->listener, dds_listener_callback);
 
     if (use_previous_events){
+      size_t unread_count = get_unread_count(entity_to_listen);
+
+      // Remove from map since we won't use it anymore
+      unread_count_map.erase(entity_to_listen);
+
       // Push events happened before having assigned a callback
-      for(size_t i = 0; i < dds_event->unread_count; i++) {
+      for(size_t i = 0; i < unread_count; i++) {
         callback(user_data, { waitable_handle, WAITABLE_EVENT });
       }
-
-      dds_event->unread_count = 0;
     }
 
     return dds_set_listener(entity_to_listen, dds_event->listener);
@@ -2540,6 +2561,10 @@ static CddsSubscription * create_cdds_subscription(
   if ((sub->enth = dds_create_reader(dds_sub, topic, qos, nullptr)) < 0) {
     RMW_SET_ERROR_MSG("failed to create reader");
     goto fail_reader;
+  } else {
+    dds_listener_t * listener = dds_create_listener(nullptr);
+    dds_lset_data_on_readers(listener, dds_non_init_listener_callback);
+    dds_set_listener(sub->enth, sub->listener);
   }
   get_entity_gid(sub->enth, sub->gid);
   if ((sub->rdcondh = dds_create_readcondition(sub->enth, DDS_ANY_STATE)) < 0) {
@@ -4214,6 +4239,10 @@ static rmw_ret_t rmw_init_cs(
   if ((sub->rdcondh = dds_create_readcondition(sub->enth, DDS_ANY_STATE)) < 0) {
     RMW_SET_ERROR_MSG("failed to create readcondition");
     goto fail_readcond;
+  } else {
+    dds_listener_t * listener = dds_create_listener(nullptr);
+    dds_lset_data_on_readers(listener, dds_non_init_listener_callback);
+    dds_set_listener(sub->enth, sub->listener);
   }
   if (dds_get_instance_handle(pub->enth, &pub->pubiid) < 0) {
     RMW_SET_ERROR_MSG("failed to get instance handle for writer");
