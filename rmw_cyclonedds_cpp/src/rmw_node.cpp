@@ -126,9 +126,6 @@ using rmw_dds_common::msg::ParticipantEntitiesInfo;
 const char * const eclipse_cyclonedds_identifier = "rmw_cyclonedds_cpp";
 const char * const eclipse_cyclonedds_serialization_format = "cdr";
 
-static std::unordered_map<dds_entity_t, size_t> unread_count_map;
-
-
 /* instance handles are unsigned 64-bit integers carefully constructed to be as close to uniformly
    distributed as possible for no other reason than making them near-perfect hash keys, hence we can
    improve over the default hash function */
@@ -344,6 +341,23 @@ struct CddsPublisher : CddsEntity
   struct ddsi_sertype * sertype;
 };
 
+struct default_callback_data_t
+{
+  default_callback_data_t()
+  {
+    mutex = new std::mutex();
+    unread_count = 0;
+  }
+
+  ~default_callback_data_t()
+  {
+    delete mutex;
+  }
+
+  std::mutex * mutex;
+  size_t unread_count;
+};
+
 struct user_callback_data_t
 {
   rmw_listener_callback_t callback;
@@ -358,6 +372,7 @@ struct CddsSubscription : CddsEntity
   dds_entity_t rdcondh;
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  default_callback_data_t default_callback_data;
 };
 
 struct client_service_id_t
@@ -385,6 +400,7 @@ struct CddsClient
 #endif
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  default_callback_data_t default_callback_data;
 };
 
 struct CddsService
@@ -392,22 +408,23 @@ struct CddsService
   CddsCS service;
   dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  default_callback_data_t default_callback_data;
 };
 
 struct CddsGuardCondition
 {
   dds_entity_t gcondh;
   dds_listener_t * listener;
-  std::mutex gc_mutex;
   user_callback_data_t user_callback_data;
-  size_t unread_count = 0;
+  default_callback_data_t default_callback_data;
 };
 
 struct CddsEvent : CddsEntity
 {
   rmw_event_type_t event_type;
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener;
   user_callback_data_t user_callback_data;
+  default_callback_data_t default_callback_data;
 };
 
 struct CddsWaitset
@@ -491,26 +508,13 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
 
 static void dds_non_init_listener_callback(dds_entity_t entity, void * arg)
 {
-  (void)arg;
+  (void)entity;
 
-  auto it = unread_count_map.find(entity);
+  struct default_callback_data_t * data;
+  data = static_cast<default_callback_data_t *>(arg);
 
-  if (it != unread_count_map.end()) {
-    it->second++;
-  } else {
-   unread_count_map.emplace(entity, 1);
-  }
-}
-
-static size_t get_unread_count(dds_entity_t entity)
-{
-  auto it = unread_count_map.find(entity);
-
-  if (it != unread_count_map.end()) {
-    return it->second;
-  }
-
-  return 0;
+  std::lock_guard<std::mutex> lock(*data->mutex);
+  data->unread_count++;
 }
 
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
@@ -522,6 +526,9 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
   dds_entity_t entity_to_listen = sub->enth;
 
+  default_callback_data_t * cb_data = &(sub->default_callback_data);
+  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+
   // Set the user callback data
   user_callback_data_t * data = &(sub->user_callback_data);
 
@@ -531,25 +538,22 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   data->entity_handle = subscription_handle;
 
   if (callback) {
-    sub->listener = dds_create_listener(data);
-    dds_lset_data_on_readers(sub->listener, dds_listener_callback);
-
     // Push events happened before having assigned a callback
-    size_t unread_count = get_unread_count(entity_to_listen);
-
-    // Remove from map since we won't use it anymore
-    unread_count_map.erase(entity_to_listen);
-
-    for(size_t i = 0; i < unread_count; i++) {
-      callback(user_data, { subscription_handle, SUBSCRIPTION_EVENT });
+    for (size_t i = 0; i < cb_data->unread_count; i++) {
+      callback(user_data, {subscription_handle, SUBSCRIPTION_EVENT});
     }
 
-    return dds_set_listener(entity_to_listen, sub->listener);
+    sub->listener = dds_create_listener(data);
+    dds_lset_data_on_readers(sub->listener, dds_listener_callback);
   } else {
     // Unset callback: If the user callback pointer is NULL,
-    // assign a NULL listener to the entity.
-    return dds_set_listener(entity_to_listen, NULL);
+    // re-assign a listener calling dds_non_init_listener_callback
+    sub->listener = dds_create_listener(cb_data);
+    dds_lset_data_on_readers(sub->listener, dds_non_init_listener_callback);
   }
+
+  cb_data->unread_count = 0;
+  return dds_set_listener(entity_to_listen, sub->listener);
 }
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
@@ -561,6 +565,9 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   auto srv = static_cast<CddsService *>(rmw_service->data);
   dds_entity_t entity_to_listen = srv->service.sub->enth;
 
+  default_callback_data_t * cb_data = &(srv->default_callback_data);
+  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+
   // Set the user callback data
   user_callback_data_t * data = &(srv->user_callback_data);
 
@@ -570,26 +577,22 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   data->entity_handle = service_handle;
 
   if (callback) {
-    srv->listener = dds_create_listener(data);
-    dds_lset_data_on_readers(srv->listener, dds_listener_callback);
-
     // Push events happened before having assigned a callback
-    size_t unread_count = get_unread_count(entity_to_listen);
-
-    // Remove from map since we won't use it anymore
-    unread_count_map.erase(entity_to_listen);
-
-    for(size_t i = 0; i < unread_count; i++) {
-      callback(user_data, { service_handle, SERVICE_EVENT });
+    for (size_t i = 0; i < cb_data->unread_count; i++) {
+      callback(user_data, {service_handle, SERVICE_EVENT});
     }
 
-    return dds_set_listener(entity_to_listen, srv->listener);
+    srv->listener = dds_create_listener(data);
+    dds_lset_data_on_readers(srv->listener, dds_listener_callback);
   } else {
     // Unset callback: If the user callback pointer is NULL,
-    // assign a NULL listener to the entity.
-    return dds_set_listener(entity_to_listen, NULL);
+    // re-assign a listener calling dds_non_init_listener_callback
+    srv->listener = dds_create_listener(cb_data);
+    dds_lset_data_on_readers(srv->listener, dds_non_init_listener_callback);
   }
 
+  cb_data->unread_count = 0;
+  return dds_set_listener(entity_to_listen, srv->listener);
 }
 
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
@@ -601,6 +604,9 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   auto cli = static_cast<CddsClient *>(rmw_client->data);
   dds_entity_t entity_to_listen = cli->client.sub->enth;
 
+  default_callback_data_t * cb_data = &(cli->default_callback_data);
+  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+
   // Set the user callback data
   user_callback_data_t * data = &(cli->user_callback_data);
 
@@ -610,25 +616,22 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   data->entity_handle = client_handle;
 
   if (callback) {
-    cli->listener = dds_create_listener(data);
-    dds_lset_data_on_readers(cli->listener, dds_listener_callback);
-
     // Push events happened before having assigned a callback
-    size_t unread_count = get_unread_count(entity_to_listen);
-
-    // Remove from map since we won't use it anymore
-    unread_count_map.erase(entity_to_listen);
-
-    for(size_t i = 0; i < unread_count; i++) {
-      callback(user_data, { client_handle, CLIENT_EVENT });
+    for (size_t i = 0; i < cb_data->unread_count; i++) {
+      callback(user_data, {client_handle, CLIENT_EVENT});
     }
 
-    return dds_set_listener(entity_to_listen, cli->listener);
+    cli->listener = dds_create_listener(data);
+    dds_lset_data_on_readers(cli->listener, dds_listener_callback);
   } else {
     // Unset callback: If the user callback pointer is NULL,
-    // assign a NULL listener to the entity.
-    return dds_set_listener(entity_to_listen, NULL);
+    // re-assign a listener calling dds_non_init_listener_callback
+    cli->listener = dds_create_listener(cb_data);
+    dds_lset_data_on_readers(cli->listener, dds_non_init_listener_callback);
   }
+
+  cb_data->unread_count = 0;
+  return dds_set_listener(entity_to_listen, cli->listener);
 }
 
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
@@ -639,11 +642,10 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   bool use_previous_events)
 {
   auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
-
-  // Lock guard condition mutex
-  std::lock_guard<std::mutex> lock(gc->gc_mutex);
-
   dds_entity_t entity_to_listen = gc->gcondh;
+
+  default_callback_data_t * cb_data = &(gc->default_callback_data);
+  std::lock_guard<std::mutex> lock(*cb_data->mutex);
 
   // Set the user callback data
   user_callback_data_t * data = &(gc->user_callback_data);
@@ -654,24 +656,25 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   data->entity_handle = guard_condition_handle;
 
   if (callback) {
-    gc->listener = dds_create_listener(data);
-    dds_lset_data_available(gc->listener, dds_listener_callback);
-
     if (use_previous_events) {
       // Push events happened before having assigned a callback
-      for(size_t i = 0; i < gc->unread_count; i++) {
-        callback(user_data, { guard_condition_handle, WAITABLE_EVENT });
+      default_callback_data_t * cb_data = &(gc->default_callback_data);
+      for (size_t i = 0; i < cb_data->unread_count; i++) {
+        callback(user_data, {guard_condition_handle, WAITABLE_EVENT});
       }
-
-      gc->unread_count = 0;
     }
 
-    return dds_set_listener(entity_to_listen, gc->listener);
+    gc->listener = dds_create_listener(data);
+    dds_lset_data_available(gc->listener, dds_listener_callback);
   } else {
     // Unset callback: If the user callback pointer is NULL,
-    // assign a NULL listener to the entity.
-    return dds_set_listener(entity_to_listen, NULL);
+    // re-assign a listener calling dds_non_init_listener_callback
+    gc->listener = dds_create_listener(cb_data);
+    dds_lset_data_on_readers(gc->listener, dds_non_init_listener_callback);
   }
+
+  cb_data->unread_count = 0;
+  return dds_set_listener(entity_to_listen, gc->listener);
 }
 
 extern "C" rmw_ret_t rmw_event_set_listener_callback(
@@ -692,6 +695,9 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   // For now, we'll just not support events
   return RMW_RET_OK;
 
+  default_callback_data_t * cb_data = &(dds_event->default_callback_data);
+  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+
   // Set the user callback data
   user_callback_data_t * data = &(dds_event->user_callback_data);
 
@@ -701,27 +707,24 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   data->entity_handle = waitable_handle;
 
   if (callback) {
-    dds_event->listener = dds_create_listener(data);
-    dds_lset_data_on_readers(dds_event->listener, dds_listener_callback);
-
-    if (use_previous_events){
-      size_t unread_count = get_unread_count(entity_to_listen);
-
-      // Remove from map since we won't use it anymore
-      unread_count_map.erase(entity_to_listen);
-
+    if (use_previous_events) {
       // Push events happened before having assigned a callback
-      for(size_t i = 0; i < unread_count; i++) {
-        callback(user_data, { waitable_handle, WAITABLE_EVENT });
+      for (size_t i = 0; i < cb_data->unread_count; i++) {
+        callback(user_data, {waitable_handle, WAITABLE_EVENT});
       }
     }
 
-    return dds_set_listener(entity_to_listen, dds_event->listener);
+    dds_event->listener = dds_create_listener(data);
+    dds_lset_data_on_readers(dds_event->listener, dds_listener_callback);
   } else {
     // Unset callback: If the user callback pointer is NULL,
-    // assign a NULL listener to the entity.
-    return dds_set_listener(entity_to_listen, NULL);
+    // re-assign a listener calling dds_non_init_listener_callback
+    dds_event->listener = dds_create_listener(cb_data);
+    dds_lset_data_on_readers(dds_event->listener, dds_non_init_listener_callback);
   }
+
+  cb_data->unread_count = 0;
+  return dds_set_listener(entity_to_listen, dds_event->listener);
 }
 
 extern "C" rmw_ret_t rmw_init_options_init(
@@ -2562,8 +2565,8 @@ static CddsSubscription * create_cdds_subscription(
     RMW_SET_ERROR_MSG("failed to create reader");
     goto fail_reader;
   } else {
-    dds_listener_t * listener = dds_create_listener(nullptr);
-    dds_lset_data_on_readers(listener, dds_non_init_listener_callback);
+    sub->listener = dds_create_listener(&sub->default_callback_data);
+    dds_lset_data_on_readers(sub->listener, dds_non_init_listener_callback);
     dds_set_listener(sub->enth, sub->listener);
   }
   get_entity_gid(sub->enth, sub->gid);
@@ -3380,8 +3383,9 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   ret = dds_set_guardcondition(gcond_impl->gcondh, true);
 
   if (ret == DDS_RETCODE_OK) {
+    default_callback_data_t * cb_data = &(gcond_impl->default_callback_data);
     // Lock guard condition mutex
-    std::lock_guard<std::mutex> lock(gcond_impl->gc_mutex);
+    std::lock_guard<std::mutex> lock(*cb_data->mutex);
 
     // Get and call the guard condition's listener callback
     dds_on_data_available_fn user_callback;
@@ -3393,7 +3397,7 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
         static_cast<void *>(&gcond_impl->user_callback_data));
     } else {
       // Increment unread count
-      gcond_impl->unread_count++;
+      cb_data->unread_count++;
     }
 
     return RMW_RET_OK;
@@ -4240,8 +4244,8 @@ static rmw_ret_t rmw_init_cs(
     RMW_SET_ERROR_MSG("failed to create readcondition");
     goto fail_readcond;
   } else {
-    dds_listener_t * listener = dds_create_listener(nullptr);
-    dds_lset_data_on_readers(listener, dds_non_init_listener_callback);
+    sub->listener = dds_create_listener(&sub->default_callback_data);
+    dds_lset_data_on_readers(sub->listener, dds_non_init_listener_callback);
     dds_set_listener(sub->enth, sub->listener);
   }
   if (dds_get_instance_handle(pub->enth, &pub->pubiid) < 0) {
