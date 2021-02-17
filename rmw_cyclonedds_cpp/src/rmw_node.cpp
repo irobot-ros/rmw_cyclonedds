@@ -481,21 +481,19 @@ extern "C" rmw_ret_t rmw_set_log_severity(rmw_log_severity_t severity)
 
 static void dds_listener_callback(dds_entity_t entity, void * arg)
 {
-  // Currently we don't use the entity which calls this callback.
-  // We need the dds_entity_t arg just to comply with the function pointer
-  // signature of 'dds_on_data_on_readers_fn' defined on dds_public_listener.h
+  // Not currently used
   (void)entity;
 
-  auto cb_data = static_cast<user_callback_data_t *>(arg);
+  auto data = static_cast<user_callback_data_t *>(arg);
 
-  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+  std::lock_guard<std::mutex> lock(*data->mutex);
 
-  if (cb_data->callback) {
-    cb_data->callback(
-      cb_data->user_data,
-      {cb_data->entity_handle, cb_data->event_type});
+  if (data->callback) {
+    data->callback(
+      data->user_data,
+      {data->entity_handle, data->event_type});
   } else {
-    cb_data->unread_count++;
+    data->unread_count++;
   }
 }
 
@@ -507,22 +505,22 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
 {
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
 
-  user_callback_data_t * cb_data = &(sub->user_callback_data);
-  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+  user_callback_data_t * data = &(sub->user_callback_data);
+  std::lock_guard<std::mutex> lock(*data->mutex);
 
   if (callback) {
     // Push events happened before having assigned a callback
-    for (size_t i = 0; i < cb_data->unread_count; i++) {
+    for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data, {subscription_handle, SUBSCRIPTION_EVENT});
     }
   }
 
   // Set the user callback data
-  cb_data->callback = callback;
-  cb_data->user_data = user_data;
-  cb_data->event_type = SUBSCRIPTION_EVENT;
-  cb_data->entity_handle = subscription_handle;
-  cb_data->unread_count = 0;
+  data->callback = callback;
+  data->user_data = user_data;
+  data->event_type = SUBSCRIPTION_EVENT;
+  data->entity_handle = subscription_handle;
+  data->unread_count = 0;
 
   return RMW_RET_OK;
 }
@@ -535,22 +533,22 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
 {
   auto srv = static_cast<CddsService *>(rmw_service->data);
 
-  user_callback_data_t * cb_data = &(srv->user_callback_data);
-  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+  user_callback_data_t * data = &(srv->user_callback_data);
+  std::lock_guard<std::mutex> lock(*data->mutex);
 
   if (callback) {
     // Push events happened before having assigned a callback
-    for (size_t i = 0; i < cb_data->unread_count; i++) {
+    for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data, {service_handle, SERVICE_EVENT});
     }
   }
 
   // Set the user callback data
-  cb_data->callback = callback;
-  cb_data->user_data = user_data;
-  cb_data->event_type = SERVICE_EVENT;
-  cb_data->entity_handle = service_handle;
-  cb_data->unread_count = 0;
+  data->callback = callback;
+  data->user_data = user_data;
+  data->event_type = SERVICE_EVENT;
+  data->entity_handle = service_handle;
+  data->unread_count = 0;
 
   return RMW_RET_OK;
 }
@@ -563,22 +561,22 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 {
   auto cli = static_cast<CddsClient *>(rmw_client->data);
 
-  user_callback_data_t * cb_data = &(cli->user_callback_data);
-  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+  user_callback_data_t * data = &(cli->user_callback_data);
+  std::lock_guard<std::mutex> lock(*data->mutex);
 
   if (callback) {
     // Push events happened before having assigned a callback
-    for (size_t i = 0; i < cb_data->unread_count; i++) {
+    for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data, {client_handle, CLIENT_EVENT});
     }
   }
 
   // Set the user callback data
-  cb_data->callback = callback;
-  cb_data->user_data = user_data;
-  cb_data->event_type = CLIENT_EVENT;
-  cb_data->entity_handle = client_handle;
-  cb_data->unread_count = 0;
+  data->callback = callback;
+  data->user_data = user_data;
+  data->event_type = CLIENT_EVENT;
+  data->entity_handle = client_handle;
+  data->unread_count = 0;
 
   return RMW_RET_OK;
 }
@@ -592,22 +590,22 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
 {
   auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
 
-  user_callback_data_t * cb_data = &(gc->user_callback_data);
-  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+  user_callback_data_t * data = &(gc->user_callback_data);
+  std::lock_guard<std::mutex> lock(*data->mutex);
 
   if (callback && use_previous_events) {
     // Push events happened before having assigned a callback
-    for (size_t i = 0; i < cb_data->unread_count; i++) {
+    for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data, {guard_condition_handle, WAITABLE_EVENT});
     }
   }
 
   // Set the user callback data
-  cb_data->callback = callback;
-  cb_data->user_data = user_data;
-  cb_data->event_type = WAITABLE_EVENT;
-  cb_data->entity_handle = guard_condition_handle;
-  cb_data->unread_count = 0;
+  data->callback = callback;
+  data->user_data = user_data;
+  data->event_type = WAITABLE_EVENT;
+  data->entity_handle = guard_condition_handle;
+  data->unread_count = 0;
 
   return RMW_RET_OK;
 }
@@ -629,22 +627,22 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   // For now, we'll just not support events
   return RMW_RET_OK;
 
-  user_callback_data_t * cb_data = &(dds_event->user_callback_data);
-  std::lock_guard<std::mutex> lock(*cb_data->mutex);
+  user_callback_data_t * data = &(dds_event->user_callback_data);
+  std::lock_guard<std::mutex> lock(*data->mutex);
 
   if (callback && use_previous_events) {
     // Push events happened before having assigned a callback
-    for (size_t i = 0; i < cb_data->unread_count; i++) {
+    for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data, {waitable_handle, WAITABLE_EVENT});
     }
   }
 
   // Set the user callback data
-  cb_data->callback = callback;
-  cb_data->user_data = user_data;
-  cb_data->event_type = WAITABLE_EVENT;
-  cb_data->entity_handle = waitable_handle;
-  cb_data->unread_count = 0;
+  data->callback = callback;
+  data->user_data = user_data;
+  data->event_type = WAITABLE_EVENT;
+  data->entity_handle = waitable_handle;
+  data->unread_count = 0;
 
   return RMW_RET_OK;
 }
@@ -3309,7 +3307,7 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   ret = dds_set_guardcondition(gcond_impl->gcondh, true);
 
   if (ret == DDS_RETCODE_OK) {
-    user_callback_data_t * cb_data = &(gcond_impl->user_callback_data);
+    user_callback_data_t * data = &(gcond_impl->user_callback_data);
 
     // Get and call the guard condition's listener callback
     dds_on_data_available_fn listener_callback;
@@ -3321,7 +3319,7 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
         static_cast<void *>(&gcond_impl->user_callback_data));
     } else {
       // Increment unread count
-      cb_data->unread_count++;
+      data->unread_count++;
     }
 
     return RMW_RET_OK;
@@ -4167,10 +4165,6 @@ static rmw_ret_t rmw_init_cs(
   if ((sub->rdcondh = dds_create_readcondition(sub->enth, DDS_ANY_STATE)) < 0) {
     RMW_SET_ERROR_MSG("failed to create readcondition");
     goto fail_readcond;
-  } else {
-    sub->listener = dds_create_listener(&sub->user_callback_data);
-    dds_lset_data_on_readers(sub->listener, dds_listener_callback);
-    dds_set_listener(sub->enth, sub->listener);
   }
   if (dds_get_instance_handle(pub->enth, &pub->pubiid) < 0) {
     RMW_SET_ERROR_MSG("failed to get instance handle for writer");
