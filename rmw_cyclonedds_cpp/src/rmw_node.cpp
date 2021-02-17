@@ -346,10 +346,6 @@ struct user_callback_data_t
   user_callback_data_t()
   {
     mutex = new std::mutex();
-    unread_count = 0;
-    callback = nullptr;
-    user_data = nullptr;
-    entity_handle = nullptr;
   }
 
   ~user_callback_data_t()
@@ -357,12 +353,12 @@ struct user_callback_data_t
     delete mutex;
   }
 
-  rmw_listener_callback_t callback;
   rmw_listener_event_type_t event_type;
-  void * user_data;
-  const void * entity_handle;
+  rmw_listener_callback_t callback {nullptr};
+  const void * entity_handle {nullptr};
+  void * user_data {nullptr};
+  size_t unread_count {0};
   std::mutex * mutex;
-  size_t unread_count;
 };
 
 struct CddsSubscription : CddsEntity
@@ -528,9 +524,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   cb_data->entity_handle = subscription_handle;
   cb_data->unread_count = 0;
 
-  sub->listener = dds_create_listener(cb_data);
-  dds_lset_data_on_readers(sub->listener, dds_listener_callback);
-  return dds_set_listener(sub->enth, sub->listener);
+  return RMW_RET_OK;
 }
 
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
@@ -558,9 +552,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   cb_data->entity_handle = service_handle;
   cb_data->unread_count = 0;
 
-  srv->listener = dds_create_listener(cb_data);
-  dds_lset_data_on_readers(srv->listener, dds_listener_callback);
-  return dds_set_listener(srv->service.sub->enth, srv->listener);
+  return RMW_RET_OK;
 }
 
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
@@ -588,9 +580,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   cb_data->entity_handle = client_handle;
   cb_data->unread_count = 0;
 
-  cli->listener = dds_create_listener(cb_data);
-  dds_lset_data_on_readers(cli->listener, dds_listener_callback);
-  return dds_set_listener(cli->client.sub->enth, cli->listener);
+  return RMW_RET_OK;
 }
 
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
@@ -619,9 +609,7 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   cb_data->entity_handle = guard_condition_handle;
   cb_data->unread_count = 0;
 
-  gc->listener = dds_create_listener(cb_data);
-  dds_lset_data_available(gc->listener, dds_listener_callback);
-  return dds_set_listener(gc->gcondh, gc->listener);
+  return RMW_RET_OK;
 }
 
 extern "C" rmw_ret_t rmw_event_set_listener_callback(
@@ -632,7 +620,6 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   bool use_previous_events)
 {
   auto dds_event = static_cast<CddsEvent *>(rmw_event->data);
-  dds_entity_t entity_to_listen = dds_event->enth;
 
   // Seems there is a dds_event for each dds_subscription,
   // and they share the same `enth`, so:
@@ -659,9 +646,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   cb_data->entity_handle = waitable_handle;
   cb_data->unread_count = 0;
 
-  dds_event->listener = dds_create_listener(cb_data);
-  dds_lset_data_on_readers(dds_event->listener, dds_listener_callback);
-  return dds_set_listener(entity_to_listen, dds_event->listener);
+  return RMW_RET_OK;
 }
 
 extern "C" rmw_ret_t rmw_init_options_init(
@@ -3276,6 +3261,10 @@ static rmw_guard_condition_t * create_guard_condition()
   if ((gcond_impl->gcondh = dds_create_guardcondition(DDS_CYCLONEDDS_HANDLE)) < 0) {
     RMW_SET_ERROR_MSG("failed to create guardcondition");
     goto fail_guardcond;
+  } else {
+    gcond_impl->listener = dds_create_listener(&gcond_impl->user_callback_data);
+    dds_lset_data_available(gcond_impl->listener, dds_listener_callback);
+    dds_set_listener(gcond_impl->gcondh, gcond_impl->listener);
   }
   guard_condition_handle = new rmw_guard_condition_t;
   guard_condition_handle->implementation_identifier = eclipse_cyclonedds_identifier;
@@ -4287,6 +4276,10 @@ extern "C" rmw_client_t * rmw_create_client(
   RET_NULL_X(rmw_client->service_name, goto fail_service_name);
   memcpy(const_cast<char *>(rmw_client->service_name), service_name, strlen(service_name) + 1);
 
+  info->listener = dds_create_listener(&info->user_callback_data);
+  dds_lset_data_on_readers(info->listener, dds_listener_callback);
+  dds_set_listener(info->client.sub->enth, info->listener);
+
   {
     // Update graph
     auto common = &node->context->impl->common;
@@ -4388,6 +4381,10 @@ extern "C" rmw_service_t * rmw_create_service(
     reinterpret_cast<const char *>(rmw_allocate(strlen(service_name) + 1));
   RET_NULL_X(rmw_service->service_name, goto fail_service_name);
   memcpy(const_cast<char *>(rmw_service->service_name), service_name, strlen(service_name) + 1);
+
+  info->listener = dds_create_listener(&info->user_callback_data);
+  dds_lset_data_on_readers(info->listener, dds_listener_callback);
+  dds_set_listener(info->service.sub->enth, info->listener);
 
   {
     // Update graph
