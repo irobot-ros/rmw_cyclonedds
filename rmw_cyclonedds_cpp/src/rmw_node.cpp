@@ -480,6 +480,23 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
   }
 }
 
+static void set_null_listener(dds_entity_t entity)
+{
+  dds_listener_t * listener = nullptr;
+  dds_get_listener(entity, listener);
+  dds_delete_listener(listener);
+  dds_set_listener(entity, NULL);
+}
+
+static void dds_set_listener_with_arg(
+  dds_entity_t entity,
+  user_callback_data_t * arg)
+{
+  dds_listener_t * listener = dds_create_listener(arg);
+  dds_lset_data_on_readers(listener, dds_listener_callback);
+  dds_set_listener(entity, listener);
+}
+
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   rmw_subscription_t * rmw_subscription,
   rmw_listener_callback_t callback,
@@ -489,10 +506,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
 
   // Set a NULL listener while we update the user callback data.
-  dds_listener_t * listener = nullptr;
-  dds_get_listener(sub->enth, listener);
-  dds_delete_listener(listener);
-  dds_set_listener(sub->enth, NULL);
+  set_null_listener(sub->enth);
 
   user_callback_data_t * data = &(sub->user_callback_data);
 
@@ -511,9 +525,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   data->unread_count = 0;
 
   // Update the listener
-  listener = dds_create_listener(data);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(sub->enth, listener);
+  dds_set_listener_with_arg(sub->enth, data);
 
   return RMW_RET_OK;
 }
@@ -527,10 +539,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   auto srv = static_cast<CddsService *>(rmw_service->data);
 
   // Set a NULL listener while we update the user callback data.
-  dds_listener_t * listener = nullptr;
-  dds_get_listener(srv->service.sub->enth, listener);
-  dds_delete_listener(listener);
-  dds_set_listener(srv->service.sub->enth, NULL);
+  set_null_listener(srv->service.sub->enth);
 
   user_callback_data_t * data = &(srv->user_callback_data);
 
@@ -549,9 +558,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   data->unread_count = 0;
 
   // Update the listener
-  listener = dds_create_listener(data);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(srv->service.sub->enth, listener);
+  dds_set_listener_with_arg(srv->service.sub->enth, data);
 
   return RMW_RET_OK;
 }
@@ -565,10 +572,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   auto cli = static_cast<CddsClient *>(rmw_client->data);
 
   // Set a NULL listener while we update the user callback data.
-  dds_listener_t * listener = nullptr;
-  dds_get_listener(cli->client.sub->enth, listener);
-  dds_delete_listener(listener);
-  dds_set_listener(cli->client.sub->enth, NULL);
+  set_null_listener(cli->client.sub->enth);
 
   user_callback_data_t * data = &(cli->user_callback_data);
 
@@ -587,9 +591,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   data->unread_count = 0;
 
   // Update the listener
-  listener = dds_create_listener(data);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(cli->client.sub->enth, listener);
+  dds_set_listener_with_arg(cli->client.sub->enth, data);
 
   return RMW_RET_OK;
 }
@@ -642,10 +644,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   return RMW_RET_OK;
 
   // Set a NULL listener while we update the user callback data.
-  dds_listener_t * listener = nullptr;
-  dds_get_listener(dds_event->enth, listener);
-  dds_delete_listener(listener);
-  dds_set_listener(dds_event->enth, NULL);
+  set_null_listener(dds_event->enth);
 
   user_callback_data_t * data = &(dds_event->user_callback_data);
 
@@ -664,9 +663,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   data->unread_count = 0;
 
   // Update the listener
-  listener = dds_create_listener(data);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(dds_event->enth, listener);
+  dds_set_listener_with_arg(dds_event->enth, data);
 
   return RMW_RET_OK;
 }
