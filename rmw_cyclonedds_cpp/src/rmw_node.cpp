@@ -343,10 +343,8 @@ struct CddsPublisher : CddsEntity
 
 struct user_callback_data_t
 {
-  rmw_listener_event_type_t event_type;
   rmw_listener_callback_t callback {nullptr};
-  const void * entity_handle {nullptr};
-  void * user_data {nullptr};
+  const void * user_data {nullptr};
   size_t unread_count {0};
 };
 
@@ -472,9 +470,7 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
   auto data = static_cast<user_callback_data_t *>(arg);
 
   if (data->callback) {
-    data->callback(
-      data->user_data,
-      {data->entity_handle, data->event_type});
+    data->callback(data->user_data);
   } else {
     data->unread_count++;
   }
@@ -500,8 +496,7 @@ static void dds_set_listener_with_arg(
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   rmw_subscription_t * rmw_subscription,
   rmw_listener_callback_t callback,
-  void * user_data,
-  const void * subscription_handle)
+  const void * user_data)
 {
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
 
@@ -513,15 +508,13 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   if (callback) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
-      callback(user_data, {subscription_handle, SUBSCRIPTION_EVENT});
+      callback(user_data);
     }
   }
 
   // Set the user callback data
   data->callback = callback;
   data->user_data = user_data;
-  data->event_type = SUBSCRIPTION_EVENT;
-  data->entity_handle = subscription_handle;
   data->unread_count = 0;
 
   // Update the listener
@@ -533,8 +526,7 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
 extern "C" rmw_ret_t rmw_service_set_listener_callback(
   rmw_service_t * rmw_service,
   rmw_listener_callback_t callback,
-  void * user_data,
-  const void * service_handle)
+  const void * user_data)
 {
   auto srv = static_cast<CddsService *>(rmw_service->data);
 
@@ -546,15 +538,13 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   if (callback) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
-      callback(user_data, {service_handle, SERVICE_EVENT});
+      callback(user_data);
     }
   }
 
   // Set the user callback data
   data->callback = callback;
   data->user_data = user_data;
-  data->event_type = SERVICE_EVENT;
-  data->entity_handle = service_handle;
   data->unread_count = 0;
 
   // Update the listener
@@ -566,8 +556,7 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
 extern "C" rmw_ret_t rmw_client_set_listener_callback(
   rmw_client_t * rmw_client,
   rmw_listener_callback_t callback,
-  void * user_data,
-  const void * client_handle)
+  const void * user_data)
 {
   auto cli = static_cast<CddsClient *>(rmw_client->data);
 
@@ -579,15 +568,13 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
   if (callback) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
-      callback(user_data, {client_handle, CLIENT_EVENT});
+      callback(user_data);
     }
   }
 
   // Set the user callback data
   data->callback = callback;
   data->user_data = user_data;
-  data->event_type = CLIENT_EVENT;
-  data->entity_handle = client_handle;
   data->unread_count = 0;
 
   // Update the listener
@@ -599,8 +586,7 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   rmw_guard_condition_t * rmw_guard_condition,
   rmw_listener_callback_t callback,
-  void * user_data,
-  const void * guard_condition_handle,
+  const void * user_data,
   bool use_previous_events)
 {
   auto gc = static_cast<CddsGuardCondition *>(rmw_guard_condition->data);
@@ -612,15 +598,13 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
   if (callback && use_previous_events) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
-      callback(user_data, {guard_condition_handle, WAITABLE_EVENT});
+      callback(user_data);
     }
   }
 
   // Set the user callback data
   data->callback = callback;
   data->user_data = user_data;
-  data->event_type = WAITABLE_EVENT;
-  data->entity_handle = guard_condition_handle;
   data->unread_count = 0;
 
   return RMW_RET_OK;
@@ -629,8 +613,7 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
 extern "C" rmw_ret_t rmw_event_set_listener_callback(
   rmw_event_t * rmw_event,
   rmw_listener_callback_t callback,
-  void * user_data,
-  const void * waitable_handle,
+  const void * user_data,
   bool use_previous_events)
 {
   auto dds_event = static_cast<CddsEvent *>(rmw_event->data);
@@ -651,15 +634,13 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   if (callback && use_previous_events) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
-      callback(user_data, {waitable_handle, WAITABLE_EVENT});
+      callback(user_data);
     }
   }
 
   // Set the user callback data
   data->callback = callback;
   data->user_data = user_data;
-  data->event_type = WAITABLE_EVENT;
-  data->entity_handle = waitable_handle;
   data->unread_count = 0;
 
   // Update the listener
