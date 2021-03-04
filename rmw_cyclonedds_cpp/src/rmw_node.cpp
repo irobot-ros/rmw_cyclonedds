@@ -473,7 +473,7 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
 
   std::lock_guard<std::mutex> guard(data->mutex);
 
-  if (data->callback) {
+  if (data->callback && data->user_data) {
     data->callback(data->user_data);
   } else {
     data->unread_count++;
