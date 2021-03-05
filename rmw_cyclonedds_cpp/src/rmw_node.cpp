@@ -2129,10 +2129,8 @@ static CddsPublisher * create_cdds_publisher(
   topic = create_topic(dds_ppant, fqtopic_name.c_str(), sertype, &stact);
 
   dds_listener_t * listener = dds_create_listener(&pub->user_callback_data);
-  // Setting the corresponding callbacks to listen for events breaks
-  // the waitset based approach. Some work on cyclonedds is needed
-  // before this can be enabled.
-  // listener_set_event_callbacks(listener);
+  // Set the corresponding callbacks to listen for events
+  listener_set_event_callbacks(listener);
 
   if (topic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
@@ -2511,11 +2509,10 @@ static CddsSubscription * create_cdds_subscription(
   topic = create_topic(dds_ppant, fqtopic_name.c_str(), sertype);
 
   dds_listener_t * listener = dds_create_listener(&sub->user_callback_data);
+  // Set the callback to listen for new messages
   dds_lset_data_available(listener, dds_listener_callback);
-  // Setting the corresponding callbacks to listen for events breaks
-  // the waitset based approach. Some work on cyclonedds is needed
-  // before this can be enabled.
-  // listener_set_event_callbacks(listener);
+  // Set the corresponding callbacks to listen for events
+  listener_set_event_callbacks(listener);
 
   if (topic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
