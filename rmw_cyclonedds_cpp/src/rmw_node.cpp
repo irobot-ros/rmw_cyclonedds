@@ -334,18 +334,22 @@ struct CddsNode
 {
 };
 
+struct user_callback_data_t
+{
+  std::mutex mutex;
+  rmw_listener_callback_t callback {nullptr};
+  const void * user_data {nullptr};
+  size_t unread_count {0};
+  const void * event_data {nullptr};
+  size_t events_unread_count {0};
+};
+
 struct CddsPublisher : CddsEntity
 {
   dds_instance_handle_t pubiid;
   rmw_gid_t gid;
   struct ddsi_sertype * sertype;
-};
-
-struct user_callback_data_t
-{
-  rmw_listener_callback_t callback {nullptr};
-  const void * user_data {nullptr};
-  size_t unread_count {0};
+  user_callback_data_t user_callback_data;
 };
 
 struct CddsSubscription : CddsEntity
@@ -391,13 +395,11 @@ struct CddsGuardCondition
 {
   dds_entity_t gcondh;
   user_callback_data_t user_callback_data;
-  std::mutex mutex;
 };
 
 struct CddsEvent : CddsEntity
 {
   rmw_event_type_t event_type;
-  user_callback_data_t user_callback_data;
 };
 
 struct CddsWaitset
@@ -469,28 +471,53 @@ static void dds_listener_callback(dds_entity_t entity, void * arg)
 
   auto data = static_cast<user_callback_data_t *>(arg);
 
-  if (data->callback) {
+  std::lock_guard<std::mutex> guard(data->mutex);
+
+  if (data->callback && data->user_data) {
     data->callback(data->user_data);
   } else {
     data->unread_count++;
   }
 }
 
-static void set_null_listener(dds_entity_t entity)
-{
-  dds_listener_t * listener = nullptr;
-  dds_get_listener(entity, listener);
-  dds_delete_listener(listener);
-  dds_set_listener(entity, NULL);
-}
+#define MAKE_DDS_EVENT_CALLBACK_FN(event_type) \
+  static void on_ ## event_type ## _fn( \
+    dds_entity_t entity, \
+    const dds_ ## event_type ## _status_t status, \
+    void * arg) \
+  { \
+    (void)status; \
+    (void)entity; \
+    auto data = static_cast<user_callback_data_t *>(arg); \
+    std::lock_guard<std::mutex> guard(data->mutex); \
+    if (data->callback && data->event_data) { \
+      data->callback(data->event_data); \
+    } else { \
+      data->events_unread_count++; \
+    } \
+  }
 
-static void dds_set_listener_with_arg(
-  dds_entity_t entity,
-  user_callback_data_t * arg)
+// Define event callback functions
+MAKE_DDS_EVENT_CALLBACK_FN(requested_deadline_missed)
+MAKE_DDS_EVENT_CALLBACK_FN(liveliness_lost)
+MAKE_DDS_EVENT_CALLBACK_FN(offered_deadline_missed)
+MAKE_DDS_EVENT_CALLBACK_FN(requested_incompatible_qos)
+MAKE_DDS_EVENT_CALLBACK_FN(sample_lost)
+MAKE_DDS_EVENT_CALLBACK_FN(offered_incompatible_qos)
+// Events of type RMW_EVENT_LIVELINESS_CHANGED are wrongly
+// taken as RMW_EVENT_REQUESTED_QOS_INCOMPATIBLE events.
+// So, lets temporarily disable this event type:
+// MAKE_DDS_EVENT_CALLBACK_FN(liveliness_changed)
+
+static void listener_set_event_callbacks(dds_listener_t * l)
 {
-  dds_listener_t * listener = dds_create_listener(arg);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(entity, listener);
+  dds_lset_requested_deadline_missed(l, on_requested_deadline_missed_fn);
+  dds_lset_requested_incompatible_qos(l, on_requested_incompatible_qos_fn);
+  dds_lset_sample_lost(l, on_sample_lost_fn);
+  dds_lset_liveliness_lost(l, on_liveliness_lost_fn);
+  dds_lset_offered_deadline_missed(l, on_offered_deadline_missed_fn);
+  dds_lset_offered_incompatible_qos(l, on_offered_incompatible_qos_fn);
+  // dds_lset_liveliness_changed(l, on_liveliness_changed_fn);
 }
 
 extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
@@ -500,25 +527,21 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
 {
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
 
-  // Set a NULL listener while we update the user callback data.
-  set_null_listener(sub->enth);
-
   user_callback_data_t * data = &(sub->user_callback_data);
+
+  std::lock_guard<std::mutex> guard(data->mutex);
+
+  // Set the user callback data
+  data->callback = callback;
+  data->user_data = user_data;
 
   if (callback) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data);
     }
+    data->unread_count = 0;
   }
-
-  // Set the user callback data
-  data->callback = callback;
-  data->user_data = user_data;
-  data->unread_count = 0;
-
-  // Update the listener
-  dds_set_listener_with_arg(sub->enth, data);
 
   return RMW_RET_OK;
 }
@@ -530,25 +553,21 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
 {
   auto srv = static_cast<CddsService *>(rmw_service->data);
 
-  // Set a NULL listener while we update the user callback data.
-  set_null_listener(srv->service.sub->enth);
-
   user_callback_data_t * data = &(srv->user_callback_data);
+
+  std::lock_guard<std::mutex> guard(data->mutex);
+
+  // Set the user callback data
+  data->callback = callback;
+  data->user_data = user_data;
 
   if (callback) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data);
     }
+    data->unread_count = 0;
   }
-
-  // Set the user callback data
-  data->callback = callback;
-  data->user_data = user_data;
-  data->unread_count = 0;
-
-  // Update the listener
-  dds_set_listener_with_arg(srv->service.sub->enth, data);
 
   return RMW_RET_OK;
 }
@@ -560,25 +579,21 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 {
   auto cli = static_cast<CddsClient *>(rmw_client->data);
 
-  // Set a NULL listener while we update the user callback data.
-  set_null_listener(cli->client.sub->enth);
-
   user_callback_data_t * data = &(cli->user_callback_data);
+
+  std::lock_guard<std::mutex> guard(data->mutex);
+
+  // Set the user callback data
+  data->callback = callback;
+  data->user_data = user_data;
 
   if (callback) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data);
     }
+    data->unread_count = 0;
   }
-
-  // Set the user callback data
-  data->callback = callback;
-  data->user_data = user_data;
-  data->unread_count = 0;
-
-  // Update the listener
-  dds_set_listener_with_arg(cli->client.sub->enth, data);
 
   return RMW_RET_OK;
 }
@@ -593,21 +608,45 @@ extern "C" rmw_ret_t rmw_guard_condition_set_listener_callback(
 
   user_callback_data_t * data = &(gc->user_callback_data);
 
-  std::lock_guard<std::mutex> lock(gc->mutex);
+  std::lock_guard<std::mutex> lock(data->mutex);
+
+  // Set the user callback data
+  data->callback = callback;
+  data->user_data = user_data;
 
   if (callback && use_previous_events) {
     // Push events happened before having assigned a callback
     for (size_t i = 0; i < data->unread_count; i++) {
       callback(user_data);
     }
+    data->unread_count = 0;
   }
+
+  return RMW_RET_OK;
+}
+
+template<typename T>
+static void event_set_listener_callback(
+  T event,
+  rmw_listener_callback_t callback,
+  const void * user_data,
+  bool use_previous_events)
+{
+  user_callback_data_t * data = &(event->user_callback_data);
+
+  std::lock_guard<std::mutex> guard(data->mutex);
 
   // Set the user callback data
   data->callback = callback;
-  data->user_data = user_data;
-  data->unread_count = 0;
+  data->event_data = user_data;
 
-  return RMW_RET_OK;
+  if (callback && use_previous_events) {
+    // Push events happened before having assigned a callback
+    for (size_t i = 0; i < data->events_unread_count; i++) {
+      callback(user_data);
+    }
+    data->events_unread_count = 0;
+  }
 }
 
 extern "C" rmw_ret_t rmw_event_set_listener_callback(
@@ -616,36 +655,23 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
   const void * user_data,
   bool use_previous_events)
 {
-  auto dds_event = static_cast<CddsEvent *>(rmw_event->data);
+  switch (rmw_event->event_data_type) {
+    case RMW_SUBSCRIBER_EVENT:
+      {
+        auto sub_event = static_cast<CddsSubscription *>(rmw_event->data);
+        event_set_listener_callback(
+          sub_event, callback, user_data, use_previous_events);
+        break;
+      }
 
-  // Seems there is a dds_event for each dds_subscription,
-  // and they share the same `enth`, so:
-  //     dds_event->enth = dds_subscription->enth
-  // So setting callbacks to this event overrides the
-  // callbacks already set for the subscription.
-  // For now, we'll just not support events
-  return RMW_RET_OK;
-
-  // Set a NULL listener while we update the user callback data.
-  set_null_listener(dds_event->enth);
-
-  user_callback_data_t * data = &(dds_event->user_callback_data);
-
-  if (callback && use_previous_events) {
-    // Push events happened before having assigned a callback
-    for (size_t i = 0; i < data->unread_count; i++) {
-      callback(user_data);
-    }
+    case RMW_PUBLISHER_EVENT:
+      {
+        auto pub_event = static_cast<CddsPublisher *>(rmw_event->data);
+        event_set_listener_callback(
+          pub_event, callback, user_data, use_previous_events);
+        break;
+      }
   }
-
-  // Set the user callback data
-  data->callback = callback;
-  data->user_data = user_data;
-  data->unread_count = 0;
-
-  // Update the listener
-  dds_set_listener_with_arg(dds_event->enth, data);
-
   return RMW_RET_OK;
 }
 
@@ -2101,6 +2127,11 @@ static CddsPublisher * create_cdds_publisher(
     rmw_cyclonedds_cpp::make_message_value_type(type_supports));
   struct ddsi_sertype * stact;
   topic = create_topic(dds_ppant, fqtopic_name.c_str(), sertype, &stact);
+
+  dds_listener_t * listener = dds_create_listener(&pub->user_callback_data);
+  // Set the corresponding callbacks to listen for events
+  listener_set_event_callbacks(listener);
+
   if (topic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
     goto fail_topic;
@@ -2108,7 +2139,7 @@ static CddsPublisher * create_cdds_publisher(
   if ((qos = create_readwrite_qos(qos_policies, false)) == nullptr) {
     goto fail_qos;
   }
-  if ((pub->enth = dds_create_writer(dds_pub, topic, qos, nullptr)) < 0) {
+  if ((pub->enth = dds_create_writer(dds_pub, topic, qos, listener)) < 0) {
     RMW_SET_ERROR_MSG("failed to create writer");
     goto fail_writer;
   }
@@ -2476,6 +2507,13 @@ static CddsSubscription * create_cdds_subscription(
     create_message_type_support(type_support->data, type_support->typesupport_identifier), false,
     rmw_cyclonedds_cpp::make_message_value_type(type_supports));
   topic = create_topic(dds_ppant, fqtopic_name.c_str(), sertype);
+
+  dds_listener_t * listener = dds_create_listener(&sub->user_callback_data);
+  // Set the callback to listen for new messages
+  dds_lset_data_available(listener, dds_listener_callback);
+  // Set the corresponding callbacks to listen for events
+  listener_set_event_callbacks(listener);
+
   if (topic < 0) {
     RMW_SET_ERROR_MSG("failed to create topic");
     goto fail_topic;
@@ -2483,13 +2521,9 @@ static CddsSubscription * create_cdds_subscription(
   if ((qos = create_readwrite_qos(qos_policies, ignore_local_publications)) == nullptr) {
     goto fail_qos;
   }
-  if ((sub->enth = dds_create_reader(dds_sub, topic, qos, nullptr)) < 0) {
+  if ((sub->enth = dds_create_reader(dds_sub, topic, qos, listener)) < 0) {
     RMW_SET_ERROR_MSG("failed to create reader");
     goto fail_reader;
-  } else {
-    dds_listener_t * listener = dds_create_listener(&sub->user_callback_data);
-    dds_lset_data_on_readers(listener, dds_listener_callback);
-    dds_set_listener(sub->enth, listener);
   }
   get_entity_gid(sub->enth, sub->gid);
   if ((sub->rdcondh = dds_create_readcondition(sub->enth, DDS_ANY_STATE)) < 0) {
@@ -2698,7 +2732,7 @@ static rmw_ret_t destroy_subscription(rmw_subscription_t * subscription)
   auto sub = static_cast<CddsSubscription *>(subscription->data);
   clean_waitset_caches();
 
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener = dds_create_listener(nullptr);
   dds_get_listener(sub->enth, listener);
   dds_delete_listener(listener);
 
@@ -3084,7 +3118,7 @@ static uint32_t get_status_kind_from_rmw(const rmw_event_type_t event_t)
 
 static rmw_ret_t init_rmw_event(
   rmw_event_t * rmw_event, const char * topic_endpoint_impl_identifier, void * data,
-  rmw_event_type_t event_type)
+  rmw_event_type_t event_type, rmw_event_data_type_t event_data_type)
 {
   RMW_CHECK_ARGUMENT_FOR_NULL(rmw_event, RMW_RET_INVALID_ARGUMENT);
   RMW_CHECK_ARGUMENT_FOR_NULL(topic_endpoint_impl_identifier, RMW_RET_INVALID_ARGUMENT);
@@ -3096,6 +3130,7 @@ static rmw_ret_t init_rmw_event(
   rmw_event->implementation_identifier = topic_endpoint_impl_identifier;
   rmw_event->data = data;
   rmw_event->event_type = event_type;
+  rmw_event->event_data_type = event_data_type;
   return RMW_RET_OK;
 }
 
@@ -3108,7 +3143,8 @@ extern "C" rmw_ret_t rmw_publisher_event_init(
     rmw_event,
     publisher->implementation_identifier,
     publisher->data,
-    event_type);
+    event_type,
+    RMW_PUBLISHER_EVENT);
 }
 
 extern "C" rmw_ret_t rmw_subscription_event_init(
@@ -3120,7 +3156,8 @@ extern "C" rmw_ret_t rmw_subscription_event_init(
     rmw_event,
     subscription->implementation_identifier,
     subscription->data,
-    event_type);
+    event_type,
+    RMW_SUBSCRIBER_EVENT);
 }
 
 extern "C" rmw_ret_t rmw_take_event(
@@ -3310,16 +3347,13 @@ extern "C" rmw_ret_t rmw_trigger_guard_condition(
   ret = dds_set_guardcondition(gcond_impl->gcondh, true);
 
   if (ret == DDS_RETCODE_OK) {
-    std::lock_guard<std::mutex> lock(gcond_impl->mutex);
-
     user_callback_data_t * data = &(gcond_impl->user_callback_data);
 
+    std::lock_guard<std::mutex> guard(data->mutex);
+
     if (data->callback) {
-      dds_listener_callback(
-        gcond_impl->gcondh,
-        static_cast<void *>(data));
+      data->callback(data->user_data);
     } else {
-      // Increment unread count
       data->unread_count++;
     }
 
@@ -4040,7 +4074,8 @@ static void get_unique_csid(const rmw_node_t * node, client_service_id_t & id)
 }
 
 static rmw_ret_t rmw_init_cs(
-  CddsCS * cs, const rmw_node_t * node,
+  CddsCS * cs, user_callback_data_t * cb_data,
+  const rmw_node_t * node,
   const rosidl_service_type_support_t * type_supports,
   const char * service_name, const rmw_qos_profile_t * qos_policies,
   bool is_service)
@@ -4080,6 +4115,9 @@ static rmw_ret_t rmw_init_cs(
   void * pub_type_support, * sub_type_support;
 
   std::unique_ptr<rmw_cyclonedds_cpp::StructValueType> pub_msg_ts, sub_msg_ts;
+
+  dds_listener_t * listener = dds_create_listener(cb_data);
+  dds_lset_data_available(listener, dds_listener_callback);
 
   if (is_service) {
     std::tie(sub_msg_ts, pub_msg_ts) =
@@ -4152,7 +4190,7 @@ static rmw_ret_t rmw_init_cs(
       cs->id) + std::string(";");
     dds_qset_userdata(qos, user_data.c_str(), user_data.size());
   }
-  if ((pub->enth = dds_create_writer(node->context->impl->dds_pub, pubtopic, qos, nullptr)) < 0) {
+  if ((pub->enth = dds_create_writer(node->context->impl->dds_pub, pubtopic, qos, listener)) < 0) {
     RMW_SET_ERROR_MSG("failed to create writer");
     goto fail_writer;
   }
@@ -4218,7 +4256,7 @@ static rmw_ret_t destroy_client(const rmw_node_t * node, rmw_client_t * client)
     return RMW_RET_INCORRECT_RMW_IMPLEMENTATION);
   auto info = static_cast<CddsClient *>(client->data);
 
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener = dds_create_listener(nullptr);
   dds_get_listener(info->client.sub->enth, listener);
   dds_delete_listener(listener);
 
@@ -4263,15 +4301,12 @@ extern "C" rmw_client_t * rmw_create_client(
 #endif
   if (
     rmw_init_cs(
-      &info->client, node, type_supports, service_name, qos_policies, false) != RMW_RET_OK)
+      &info->client, &info->user_callback_data,
+      node, type_supports, service_name, qos_policies, false) != RMW_RET_OK)
   {
     delete (info);
     return nullptr;
   }
-
-  dds_listener_t * listener = dds_create_listener(&info->user_callback_data);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(info->client.sub->enth, listener);
 
   rmw_client_t * rmw_client = rmw_client_allocate();
   RET_NULL_X(rmw_client, goto fail_client);
@@ -4332,7 +4367,7 @@ static rmw_ret_t destroy_service(const rmw_node_t * node, rmw_service_t * servic
     return RMW_RET_INCORRECT_RMW_IMPLEMENTATION);
   auto info = static_cast<CddsService *>(service->data);
 
-  dds_listener_t * listener = nullptr;
+  dds_listener_t * listener = dds_create_listener(nullptr);
   dds_get_listener(info->service.sub->enth, listener);
   dds_delete_listener(listener);
 
@@ -4374,15 +4409,12 @@ extern "C" rmw_service_t * rmw_create_service(
   CddsService * info = new CddsService();
   if (
     rmw_init_cs(
-      &info->service, node, type_supports, service_name, qos_policies, true) != RMW_RET_OK)
+      &info->service, &info->user_callback_data,
+      node, type_supports, service_name, qos_policies, true) != RMW_RET_OK)
   {
     delete (info);
     return nullptr;
   }
-
-  dds_listener_t * listener = dds_create_listener(&info->user_callback_data);
-  dds_lset_data_on_readers(listener, dds_listener_callback);
-  dds_set_listener(info->service.sub->enth, listener);
 
   rmw_service_t * rmw_service = rmw_service_allocate();
   RET_NULL_X(rmw_service, goto fail_service);
