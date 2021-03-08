@@ -4190,13 +4190,13 @@ static rmw_ret_t rmw_init_cs(
       cs->id) + std::string(";");
     dds_qset_userdata(qos, user_data.c_str(), user_data.size());
   }
-  if ((pub->enth = dds_create_writer(node->context->impl->dds_pub, pubtopic, qos, listener)) < 0) {
+  if ((pub->enth = dds_create_writer(node->context->impl->dds_pub, pubtopic, qos, nullptr)) < 0) {
     RMW_SET_ERROR_MSG("failed to create writer");
     goto fail_writer;
   }
   get_entity_gid(pub->enth, pub->gid);
   pub->sertype = pub_stact;
-  if ((sub->enth = dds_create_reader(node->context->impl->dds_sub, subtopic, qos, nullptr)) < 0) {
+  if ((sub->enth = dds_create_reader(node->context->impl->dds_sub, subtopic, qos, listener)) < 0) {
     RMW_SET_ERROR_MSG("failed to create reader");
     goto fail_reader;
   }
