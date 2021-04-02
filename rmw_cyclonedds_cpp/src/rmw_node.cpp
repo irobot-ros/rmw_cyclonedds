@@ -45,7 +45,7 @@
 #include "rmw/get_node_info_and_types.h"
 #include "rmw/get_service_names_and_types.h"
 #include "rmw/get_topic_names_and_types.h"
-#include "rmw/listener_callback_type.h"
+#include "rmw/event_callback_type.h"
 #include "rmw/names_and_types.h"
 #include "rmw/rmw.h"
 #include "rmw/sanity_checks.h"
@@ -345,10 +345,10 @@ struct CddsNode
 struct user_callback_data_t
 {
   std::mutex mutex;
-  rmw_listener_callback_t callback {nullptr};
+  rmw_event_callback_t callback {nullptr};
   const void * user_data {nullptr};
   size_t unread_count {0};
-  rmw_listener_callback_t event_callback[DDS_STATUS_ID_MAX + 1] {nullptr};
+  rmw_event_callback_t event_callback[DDS_STATUS_ID_MAX + 1] {nullptr};
   const void * event_data[DDS_STATUS_ID_MAX + 1] {nullptr};
   size_t event_unread_count[DDS_STATUS_ID_MAX + 1] {0};
 };
@@ -532,9 +532,9 @@ static void listener_set_event_callbacks(dds_listener_t * l)
   dds_lset_liveliness_changed(l, on_liveliness_changed_fn);
 }
 
-extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
+extern "C" rmw_ret_t rmw_subscription_set_on_new_message_callback(
   rmw_subscription_t * rmw_subscription,
-  rmw_listener_callback_t callback,
+  rmw_event_callback_t callback,
   const void * user_data)
 {
   auto sub = static_cast<CddsSubscription *>(rmw_subscription->data);
@@ -556,9 +556,9 @@ extern "C" rmw_ret_t rmw_subscription_set_listener_callback(
   return RMW_RET_OK;
 }
 
-extern "C" rmw_ret_t rmw_service_set_listener_callback(
+extern "C" rmw_ret_t rmw_service_set_on_new_request_callback(
   rmw_service_t * rmw_service,
-  rmw_listener_callback_t callback,
+  rmw_event_callback_t callback,
   const void * user_data)
 {
   auto srv = static_cast<CddsService *>(rmw_service->data);
@@ -580,9 +580,9 @@ extern "C" rmw_ret_t rmw_service_set_listener_callback(
   return RMW_RET_OK;
 }
 
-extern "C" rmw_ret_t rmw_client_set_listener_callback(
+extern "C" rmw_ret_t rmw_client_set_on_new_response_callback(
   rmw_client_t * rmw_client,
-  rmw_listener_callback_t callback,
+  rmw_event_callback_t callback,
   const void * user_data)
 {
   auto cli = static_cast<CddsClient *>(rmw_client->data);
@@ -605,10 +605,10 @@ extern "C" rmw_ret_t rmw_client_set_listener_callback(
 }
 
 template<typename T>
-static void event_set_listener_callback(
+static void event_set_callback(
   T event,
   dds_status_id_t status_id,
-  rmw_listener_callback_t callback,
+  rmw_event_callback_t callback,
   const void * user_data)
 {
   user_callback_data_t * data = &(event->user_callback_data);
@@ -626,16 +626,16 @@ static void event_set_listener_callback(
   }
 }
 
-extern "C" rmw_ret_t rmw_event_set_listener_callback(
+extern "C" rmw_ret_t rmw_event_set_callback(
   rmw_event_t * rmw_event,
-  rmw_listener_callback_t callback,
+  rmw_event_callback_t callback,
   const void * user_data)
 {
   switch (rmw_event->event_type) {
     case RMW_EVENT_LIVELINESS_CHANGED:
       {
         auto sub_event = static_cast<CddsSubscription *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           sub_event, DDS_LIVELINESS_CHANGED_STATUS_ID,
           callback, user_data);
         break;
@@ -644,7 +644,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     case RMW_EVENT_REQUESTED_DEADLINE_MISSED:
       {
         auto sub_event = static_cast<CddsSubscription *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           sub_event, DDS_REQUESTED_DEADLINE_MISSED_STATUS_ID,
           callback, user_data);
         break;
@@ -653,7 +653,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     case RMW_EVENT_REQUESTED_QOS_INCOMPATIBLE:
       {
         auto sub_event = static_cast<CddsSubscription *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           sub_event, DDS_REQUESTED_INCOMPATIBLE_QOS_STATUS_ID,
           callback, user_data);
         break;
@@ -662,7 +662,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     case RMW_EVENT_MESSAGE_LOST:
       {
         auto sub_event = static_cast<CddsSubscription *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           sub_event, DDS_SAMPLE_LOST_STATUS_ID,
           callback, user_data);
         break;
@@ -671,7 +671,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     case RMW_EVENT_LIVELINESS_LOST:
       {
         auto pub_event = static_cast<CddsPublisher *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           pub_event, DDS_LIVELINESS_LOST_STATUS_ID,
           callback, user_data);
         break;
@@ -680,7 +680,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     case RMW_EVENT_OFFERED_DEADLINE_MISSED:
       {
         auto pub_event = static_cast<CddsPublisher *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           pub_event, DDS_OFFERED_DEADLINE_MISSED_STATUS_ID,
           callback, user_data);
         break;
@@ -689,7 +689,7 @@ extern "C" rmw_ret_t rmw_event_set_listener_callback(
     case RMW_EVENT_OFFERED_QOS_INCOMPATIBLE:
       {
         auto pub_event = static_cast<CddsPublisher *>(rmw_event->data);
-        event_set_listener_callback(
+        event_set_callback(
           pub_event, DDS_OFFERED_INCOMPATIBLE_QOS_STATUS_ID,
           callback, user_data);
         break;
