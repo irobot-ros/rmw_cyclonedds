@@ -2283,19 +2283,6 @@ static bool dds_qos_to_rmw_qos(const dds_qos_t * dds_qos, rmw_qos_profile_t * qo
   return true;
 }
 
-static bool get_readwrite_qos(dds_entity_t handle, rmw_qos_profile_t * rmw_qos_policies)
-{
-  dds_qos_t * qos = dds_create_qos();
-  dds_return_t ret = false;
-  if (dds_get_qos(handle, qos) < 0) {
-    RMW_SET_ERROR_MSG("get_readwrite_qos: invalid handle");
-  } else {
-    ret = dds_qos_to_rmw_qos(qos, rmw_qos_policies);
-  }
-  dds_delete_qos(qos);
-  return ret;
-}
-
 static bool is_type_self_contained(const rosidl_message_type_support_t * type_supports)
 {
   auto ts = get_message_typesupport_handle(
