@@ -2922,6 +2922,16 @@ extern "C" rmw_ret_t rmw_destroy_publisher(rmw_node_t * node, rmw_publisher_t * 
   return ret;
 }
 
+extern "C" rmw_ret_t rmw_publisher_count_non_local_matched_subscriptions(
+  const rmw_publisher_t * publisher,
+  size_t * non_local_subscription_count)
+{
+  static_cast<void>(publisher);
+  static_cast<void>(non_local_subscription_count);
+  RMW_SET_ERROR_MSG("rmw_publisher_count_non_local_matched_subscriptions not implemented for rmw_cyclonedds_cpp");
+  return RMW_RET_UNSUPPORTED;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 ///////////                                                                   ///////////
