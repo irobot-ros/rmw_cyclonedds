@@ -1502,7 +1502,7 @@ extern "C" rmw_ret_t rmw_context_fini(rmw_context_t * context)
 extern "C" rmw_ret_t rmw_notify_participant_dynamic_network_interface(rmw_context_t * context)
 {
   static_cast<void>(context);
-  // RMW_SET_ERROR_MSG("rmw_notify_participant_dynamic_network_interface not implemented for rmw_cyclonedds_cpp");
+  RMW_SET_ERROR_MSG("rmw_notify_participant_dynamic_network_interface not implemented for rmw_cyclonedds_cpp");
   return RMW_RET_UNSUPPORTED;
 }
 
