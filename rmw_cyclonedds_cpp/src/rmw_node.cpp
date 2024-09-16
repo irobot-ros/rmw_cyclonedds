@@ -2753,7 +2753,7 @@ extern "C" rmw_ret_t rmw_publisher_count_non_local_matched_subscriptions(
 {
   static_cast<void>(publisher);
   static_cast<void>(non_local_subscription_count);
-  RMW_SET_ERROR_MSG("rmw_publisher_count_non_local_matched_subscriptions not implemented for rmw_cyclonedds_cpp");
+  //RMW_SET_ERROR_MSG("rmw_publisher_count_non_local_matched_subscriptions not implemented for rmw_cyclonedds_cpp");
   return RMW_RET_UNSUPPORTED;
 }
 
